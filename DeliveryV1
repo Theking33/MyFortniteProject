@@ -1,0 +1,4428 @@
+using { /Fortnite.com/Devices }
+using { /Verse.org/Simulation }
+using { /UnrealEngine.com/Temporary/UI }
+using { /Fortnite.com/UI }
+using { /Verse.org/Colors }
+using { /Verse.org/Random }
+using { /UnrealEngine.com/Temporary/SpatialMath }
+using { /Fortnite.com/Characters }
+using { /Verse.org/SceneGraph }
+using { /UnrealEngine.com/Itemization }
+using { /UnrealEngine.com/Temporary/Diagnostics }
+using { /Fortnite.com/Vehicles }
+using { /Fortnite.com/Marketplace }
+using { /Verse.org/Assets }
+
+
+
+# تعريف مسميات المنتجات
+# 1. مكتبة الأيقونات والأسماء (تأكد أن هذا خارج كلاس الجهاز)
+MoneyProductsI := module:
+    # عنوان المتجر الرئيسي الذي يظهر في الأعلى
+    StoreTitle<localizes><public> : message = "مركز الدعم المالي 💰"
+    SmallPack<public> := module:
+        Name<localizes><public> : message = "حزمة 500$"
+        FullDescription<localizes><public> : message = "قم بزيادة رصيدك بـ 500$ لتتمكن من ترقية أدوات المطعم  وتوسيع مطعمك فوراً!"
+        ShortDescription<localizes><public> : message = "إضافة 500$ لرصيدك"
+    MediumPack<public> := module:
+        Name<localizes><public> : message = "حزمة 1,200$"
+        FullDescription<localizes><public> : message = "قم بزيادة رصيدك بـ 1,200$ لتتمكن من ترقية أدوات المطعم وتوسيع مطعمك فوراً!"
+        ShortDescription<localizes><public> : message = "إضافة 1200$ لرصيدك"
+
+    LargePack<public> := module:
+        Name<localizes><public> : message = "حزمة 3,500$"
+        FullDescription<localizes><public> : message = "قم بزيادة رصيدك بـ 3,500$ لتتمكن من ترقية أدوات المطعم وتوسيع مطعمك فوراً!"
+        ShortDescription<localizes><public> : message = "إضافة 3500$ لرصيدك"
+
+# 2. تعريف المنتجات (انتبه لإغلاق الموديول هنا)
+MoneyProducts := module:
+    using {MoneyProductsI}
+    island_money_products<public> := class<abstract><castable>(entitlement){}
+
+    SmallMoney<public> := class<concrete>(island_money_products):
+        var Name<override>:message = SmallPack.Name
+        var Description<override>:message = SmallPack.ShortDescription
+        var ShortDescription<override>:message = SmallPack.ShortDescription
+        # استخدام المسار الكامل لتجنب الخطأ السابق
+        var Icon<override>:texture = Delivery.MoneyIcon
+        Consumable<override>: logic = true
+        MaxCount<override>: int = 99
+
+
+    MediumMoney<public> := class<concrete>(island_money_products):
+        var Name<override>:message = MediumPack.Name
+        var Description<override>:message = MediumPack.FullDescription
+        var ShortDescription<override>:message = MediumPack.ShortDescription
+        # استخدام المسار الكامل لتجنب الخطأ السابق
+        var Icon<override>:texture = Delivery.MoneyIcon
+        Consumable<override>: logic = true
+        MaxCount<override>: int = 99
+
+
+    LargeMoney<public> := class<concrete>(island_money_products):
+        var Name<override>:message = LargePack.Name
+        var Description<override>:message = LargePack.FullDescription
+        var ShortDescription<override>:message = LargePack.ShortDescription
+        var Icon<override>:texture = Delivery.MoneyIcon
+        Consumable<override>: logic = true
+        MaxCount<override>: int = 99
+
+# 3. تعريف الأسعار بالفيبوكس
+MoneyOffers := module:
+    SmallOffer<public> := class(entitlement_offer):
+        var Name<override>:message = MoneyProductsI.SmallPack.Name
+        var Description<override>:message = MoneyProductsI.SmallPack.FullDescription
+        var ShortDescription<override>:message = MoneyProductsI.SmallPack.ShortDescription
+        var Icon<override>:texture = Delivery.MoneyIcon
+
+        EntitlementType<override>:concrete_subtype(entitlement) = MoneyProducts.SmallMoney
+        Price <override>:price_dimension = MakePriceVBucks(50.0)
+
+    MediumOffer<public> := class(entitlement_offer):
+        var Name<override>:message = MoneyProductsI.MediumPack.Name
+        var Description<override>:message = MoneyProductsI.MediumPack.FullDescription
+        var ShortDescription<override>:message = MoneyProductsI.MediumPack.ShortDescription
+        var Icon<override>:texture = Delivery.MoneyIcon
+
+        EntitlementType<override>:concrete_subtype(entitlement) = MoneyProducts.MediumMoney
+        Price <override>:price_dimension = MakePriceVBucks(100.0)
+
+
+
+
+    LargeOffer<public> := class(entitlement_offer):
+        var Name<override>:message = MoneyProductsI.LargePack.Name
+        var Description<override>:message = MoneyProductsI.LargePack.FullDescription
+        var ShortDescription<override>:message = MoneyProductsI.LargePack.ShortDescription
+        var Icon<override>: texture = Delivery.MoneyIcon
+
+        EntitlementType<override>:concrete_subtype(entitlement) = MoneyProducts.LargeMoney
+        Price <override>:price_dimension = MakePriceVBucks(200.0)
+
+
+
+
+
+
+
+# دالة مساعدة لتحويل الرقم الصحيح إلى فلوت بدون أخطاء
+IntToFloat(InInt : int) : float =
+    return InInt * 1.0
+
+# ====== حفظ بيانات اللاعب ===========
+var SavedPlayerData : weak_map(player, player_stats) = map{}
+
+# ==== كلاس شامل لكل بيانات اللاعب القابلة للحفظ ====
+player_stats := class<final><persistable>:
+    # --- الإحصائيات الأساسية ---
+    Money : int = 120            # البداية بـ 200$ كما طلبت
+    Level : int = 1
+    CurrentDay : int = 1
+    TotalOrders : int = 0
+    SavedReputation : float = 0.0     # السمعة
+    SavedTotalDeliveries : int = 0    # إجمالي التوصيلات
+    SavedBonusTime : float = 0.0  # هذا اللي رح يحفظ الثواني الإضافية
+    
+    # --- ديون الخدمات ---
+    SavedDebtElectricity : int = 0
+    SavedDebtRent : int = 0
+
+    # --- مستويات التطوير (من الكود السابق) ---
+    SavedPrepLevel : int = 0
+    SavedCookLevel : int = 0
+    SavedPackLevel : int = 0
+    
+    # --- حالات الشراء الخاصة ---
+    HasRadarUpgrade : logic = false
+    IsVIPPurchased : logic = false
+
+    # --- + الإضافات التي وجدتها في كودك وغير موجودة هنا + ---
+    HasSpeedUpgrade : logic = false      # لتطوير السرعة
+    HasScooterUnlocked : logic = false   # لفتح السكوتر
+    HasVehicleUnlocked : logic = false   # لفتح السيارة (ATK)
+    HasHeatBag : logic = false          # حقيبة التسخين
+    InventoryStocks : []int = array{}
+    # --- الإضافات الجديدة للمخزن المركزي ---
+    SavedWarehouseLevel : int = 1
+    SavedGlobalMaxCapacity : int = 50
+    SavedOwnedCars : []int = array{} # السيارات المملوكه 
+
+    # اشياء مستقبليه ممكن استخدمها 
+    PlayerXP : int = 0 # Xp مستوى
+    SpecialTokens : int = 0 # عملة خاصة 
+    TotalTipsEarned : int = 0  # إجمالي الإكراميات التي جمعها طوال مسيرته
+    MaxDailyProfit : int = 0    # أعلى ربح يومي حققه
+    UnlockedPerks : []int = array{} # أرقام تمثل تطويرات مستقبلية
+    SkillPoints : int = 0 # مهارات اللاعب 
+    TotalFailedOrders : int = 0 # عدد الطلبات التي فشل في توصيلها أو ألغاها
+    DataVersion : int = 1
+    FastestDeliveryTime : float = 999.0 # أصغر رقم هو الأفضل
+    MostExpensiveOrder : int = 0
+    LastLoginTimestamp : string = "" # لحساب المكافآت اليومية مستقبلاً (Daily Rewards)
+    HasSeenWelcome : logic = false
+    HasFuel : int = 0
+    SavedLevelThreshold : int = 5
+    
+
+    
+   
+
+
+
+    # تعريف كلاس بسيط يربط الزر بالسيارة
+car_purchase_handler := class(creative_device):
+    @editable CarID : int = 0
+    @editable Price : int = 0
+    @editable BuyButton : button_device = button_device{}
+    
+
+
+
+# كلاس وسيط يرسل "إشارة" فقط ولا يحتاج لمعرفة المدير
+car_button_handler := class<concrete>():
+    CarIndex : int = 0
+    # حدث (Event) خاص يرسل رقم السيارة واللاعب
+    BuySignal : event(tuple(agent, int)) = event(tuple(agent, int)){}
+
+    OnButtonClicked(InAgent : agent) : void =
+        # يرسل الإشارة: "يا ناس، اللاعب فلان ضغط السيارة رقم كذا"
+        BuySignal.Signal(InAgent, CarIndex)
+    
+
+
+
+
+
+# رسائل الرضا التام (توصيل سريع جداً)
+HappyMessages : []string = array{
+    "✅ واو! الأكل لسا سخن نار، شكراً على السرعة! 🔥",
+    "✅ أسرع دليفري جربته بحياتي! ",
+    "✅ الأكل وصل حار، شكراً لك! 🔥",
+    "✅ أفضل دليفري في المدينة! ⭐",
+    "✅ خدمة رائعة، رمضان كريم عليك وعلى أهلك 🤲", # احذفها بعد رمضان
+    "✅ شكراً من القلب، رمضان يجمعنا على المحبة 💖", # احذفها بعد رمضان
+    "✅ خدمة سريعة جداً، عاشت إيدك! 🏃‍♂️",
+    "✅ أسرع من البرق، شكراً! ⚡",
+
+    "✅ الطعم خرافي، عنجد أبدعت! 🤩",
+    "✅ التوصيل أنيق ومرتب جداً! 🎁",
+    "✅ تجربة ولا أروع، رح أكررها! ",
+    "✅ الطلب وصل قبل ما أتوقع! ",
+    "✅ كل شي سخن وطازج، رهيب! ",
+    "✅ خدمة خمس نجوم، شكراً! ⭐⭐⭐⭐⭐",
+    "✅ وصلت قبل الموعد، تستاهل تقييم ممتاز! ⭐"
+}
+
+# رسائل عادية (توصيل في الوقت المناسب)
+NeutralMessages : []string = array{
+    "✅ شكراً، الطلب وصل بحالة جيدة.",
+    "✅ وصلت الطلبية، يعطيك العافية.",
+    "✅ شكراً، وصلت الطلبية بخير، الله يتقبل صيامك 🤲", # احذفها بعد رمضان 
+    "✅ كل شي تمام، رمضان يجمعنا على الخير والمحبة 💫", # احذفها بعد رمضان 
+    "✅ شكراً، سأطلب منك دائماً! 🙌",
+    "✅ كل شيء تمام، شكراً لك."
+    
+}
+
+# رسائل انزعاج (إذا شارف الوقت على الانتهاء)
+AngryMessages : []string = array{
+    "❌ تأخرت كثير، الأكل كاد يبرد! 🥶",
+    "❌ أخيراً وصلت؟ كنت رح ألغي الطلب!",
+    "❌ المرة الجاي حاول تكون أسرع شوي..",
+    "❌ خدمة بطيئة جداً، ما بتوقع أطلب مرة ثانية! 🚫",
+    "❌ صارلي ساعة بستنى، هذا مش مقبول! ",
+    "❌ الأكل فقد طعمه من كثر الانتظار! 🤦‍♂️",
+    "❌ إذا ما في التزام بالوقت، ليش أطلب؟ 🤷‍♀️"
+
+}
+
+
+
+
+
+
+   
+    
+    
+   
+    
+
+
+
+
+
+
+
+    
+
+# كلاس وسيط لربط زر الشراء بالمنتج الصحيح
+product_purchase_handler := class():
+    ProductIndex : int
+    Manager : delivery_manager_device
+
+   
+    OnBuyClicked(wm : widget_message) : void =
+        # 1. استخراج اللاعب من الرسالة
+        InPlayer := wm.Player
+        
+        # 2. تمرير اللاعب مع رقم المنتج للدالة
+        Manager.ProcessPurchase(InPlayer, ProductIndex)
+
+
+
+
+    
+# دالة مساعدة لتحويل النص (يجب أن تكون خارج الكلاس)
+TextToMsg<localizes>(Text : string) : message = "{Text}"
+
+# الحالات الخاصة بالطلب
+order_status := enum{Preparing, Cooking, Packaging, Delivering, Completed}
+
+# كلاس تعريف الطعام
+food_item := class<concrete>:
+    @editable Button : button_device = button_device{}
+    @editable ItemGranter : item_granter_device = item_granter_device{}
+
+    @editable CookedGranter : item_granter_device = item_granter_device{} # الأكل المطبوخ (الجديد)
+    @editable FoodName : string = ""
+    @editable RequiredLevel : int = 1
+    @editable ItemChecker : conditional_button_device = conditional_button_device{} # جهاز فحص وسحب المادة الخام
+    @editable NeedsCooking : logic = true # هذا هو مفتاح الحل
+    @editable CookingTime : float = 10.0 # وقت الطبخ الخاص بكل صنف
+    # --- الإضافات الجديدة ---
+    @editable var Stock : int = 0       # المخزون الحالي
+    @editable var BuyPrice : int = 50       # سعر شراء شحنة (مثلاً 10 حبات)
+
+
+# تعريف متطلبات الحدث بشكل مستقل
+event_requirement := struct:
+    FoodName : string
+    RequiredAmount : int
+    CurrentBatchCount : int
+    IsCookedCount : int # عداد جديد للحبات اللي انطبخت
+    IsFullyPacked : logic
+
+# كلاس تعريف الشقة
+apartment_zone := class<concrete>:
+    @editable CondButton : conditional_button_device = conditional_button_device{}
+    @editable ApartmentID : int = 0
+    @editable Radar : map_indicator_device = map_indicator_device{} # الرادار الخاص مبنى
+
+# كلاس الطلب النشط
+
+active_order := class<concrete>:
+    TargetApartmentID : int = 0
+    FoodName : []string = array{}
+    var CurrentStatus : order_status = order_status.Preparing
+    var TimeRemaining : float = 60.0
+    NeedsCooking : logic = true
+
+    var CookedGranter : item_granter_device = item_granter_device{}
+    IsVIP : logic = false # أضف هذا السطر هنا
+    FoodIndex : int = 0 
+
+
+
+
+# الجهاز الرئيسي
+delivery_manager_device := class(creative_device):
+    
+
+    var IsCountingDown : logic = false
+    
+  
+    var BonusDeliveryTime : float = 0.0  # القيمة الافتراضية للزيادة هي صفر
+    var ButtonHandlers : []car_button_handler = array{} # أضف هذا المتغير في الأعلى
+    var DayCount : int = 1 # نبدأ من اليوم الأول
+    
+
+
+    # يحفظ اسم التطوير الحالي الذي ننتظر تأكيده (مثلاً: "المخزن")
+    var PendingUpgradeName : string = "" 
+    # يحفظ "رقم" العملية لنميز بين تطوير المخزن، التحضير، الخ..
+    var PendingUpgradeID : int = 0
+    
+
+    #====================================
+    # =============  بنزين ============= 
+    #====================================
+    @editable MyStation : service_station_device = service_station_device{}
+    @editable MyButton1 : button_device = button_device{}
+    @editable MyButton2 : button_device = button_device{} # استخدام الزر العادي
+    var PlayerHasFuel : int = 0 # 0 يعني لا يملك، 1 يعني يملك
+
+   
+    
+    
+    # ======== ديون الفواتير ===========
+    var DebtElectricity : int = 0
+    var DebtRent : int = 0
+    
+    # ===== مبالغ تضاف يوميا مثل (كهرباء وايجار) 
+    ElectricityDailyFee : int = 20
+    RentDailyFee : int = 50
+
+
+    var DailySalesTracker : [string]int = map{}
+
+
+
+    # الوردية بتبدأ الساعة 8 صباحاً
+    var CurrentHour : int = 8
+    var CurrentMinute : int = 0
+    # العداد الحقيقي اللي بنحسب فيه الدقيقة
+    var RealTimeSeconds : float = 0.0
+
+
+   
+   
+    
+    # إحصائيات اليوم (بتتصفر كل يوم جديد)
+    var DayEarnings : int = 0
+    var DayOrdersCount : int = 0
+    var IsDayActive : logic = false
+    var ActiveOrder : logic = false
+
+
+   
+    # متغير لحفظ حالة شراء الرادار
+    var HasRadarUpgrade : logic = false
+    
+
+    # لتحديد التبويب المفتوح (0 للتطويرات، 1 للمشتريات)
+    var CurrentTab : int = 0
+   
+
+    # --- أجهزة خارجية ---
+    @editable ComputerInteraction : button_device = button_device{}
+    
+
+    # --- متغيرات المستويات ---
+    var PrepLevel : int = 0
+    var CookLevel : int = 0
+    var PackLevel : int = 0
+    
+    var BasePrice : int = 300
+
+    # --- متغيرات الـ UI لحفظ الحالة ---
+    var MainCanvas : ?canvas = false
+    var ConfirmCanvas : ?canvas = false
+    var CurrentBuyingType : string = "" # لحفظ نوع التطوير الذي اختاره اللاعب
+
+    var PlayerUIElements : [player]canvas = map{}
+    var ShopStatusMessage : string = ""
+
+    var StatusColor : color = NamedColors.White # اللون الافتراضي
+
+# الخاص بالكانفا عشان ما يرمش 
+    var CurrentPage : int = 0
+    ItemsPerPage : int = 6
+    var OverlayHolder : overlay = overlay{}
+
+
+    # -------------------------- احذفه هاد اختبار --------------
+    @editable
+    TestButtonDevice : button_device = button_device{}
+
+
+
+
+
+
+    var ButtonSubscriptions : []cancelable = array{}
+
+
+    # ======= الرسائل =======
+   
+    @editable SummaryHUD : hud_message_device = hud_message_device{} # رسالة ملخص اليوم
+    @editable HUDMessage : hud_message_device = hud_message_device{}
+
+    # ======= الاصــــوات =======
+
+    @editable PurchaseSound : audio_player_device = audio_player_device{}
+    @editable OrderSound : audio_player_device = audio_player_device{}
+    @editable PhoneAudio : audio_player_device = audio_player_device{} 
+    @editable LevelUpSFX : audio_player_device = audio_player_device{} # صوت مستوى جديد
+
+  # ======= الواجهه الخاصة ب UptadeUI =========== 
+    var MoneyTextBlock : text_block = text_block{}
+    var LevelTextBlock : text_block = text_block{}
+    var OrderTextBlock : text_block = text_block{}
+    var TimeTextBlock : text_block = text_block{}
+
+    # ====== الواجهةة الخاصة ب UpgradeUptadeMenu ========
+    # متغيرات للتحكم في نافذة التأكيد داخل الكانفاس الرئيسي
+    var ConfirmOverlay : overlay = overlay{}
+    var ConfirmTitle : text_block = text_block{}
+    var ConfirmPrice : text_block = text_block{}
+
+
+    # ======= XP مانح ========
+    
+    @editable EventAccolade : accolades_device = accolades_device{} # جائزة إتمام الأحداث
+    @editable OrderAccolade : accolades_device = accolades_device{} # جائزة الطلبات العادية
+    @editable DayCompleteAccolade :accolades_device = accolades_device{} # جائزة نهاية اليوم 
+    @editable LevelUpAccolade :accolades_device = accolades_device{} # جائزة ارتفاع المستوى 
+    @editable VIPOrderAccolade : accolades_device = accolades_device{} # جائزة طلبات الـ VIP
+
+
+    @editable ShopSwitch : switch_device = switch_device{} # مفتاح فتح/إغلاق المحل
+    @editable NextOrderButton : button_device = button_device{} # زر "طلب جديد"
+    
+    
+    
+    
+
+    
+    @editable BonusUpgradeButton : button_device = button_device{} 
+    
+    
+    # قائمة الطعام وازرارها
+    @editable FoodMenu : []food_item = array{} # قائمة الطعام
+    @editable Apartments : []apartment_zone = array{}
+    @editable PackagingButton : button_device = button_device{}
+    @editable BoxGranter : item_granter_device = item_granter_device{}
+    @editable ItemRemover : item_remover_device = item_remover_device{}
+
+    @editable BuySpeedButton : button_device = button_device{}
+    
+    @editable SpeedModulator : movement_modulator_device = movement_modulator_device{}
+    @editable ScooterSpawner : vehicle_spawner_driftboard_device = vehicle_spawner_driftboard_device{} # سكوتر 
+    
+
+    @editable MaxTipAmount : int = 50  # أقصى مبلغ إكرامية ممكن
+    @editable TipChance : float = 40.0 # نسبة احتمالية الحصول على إكرامية (مثلاً 40%)
+    
+    @editable CookingButton : button_device = button_device{} # زر تشغيل الفرن
+    @editable PrepButton : button_device = button_device{} # زر التحظير
+
+    @editable OvenVFX : vfx_spawner_device = vfx_spawner_device{} # جهاز الدخان أو الفقاعات
+    @editable BoilingSFX : audio_player_device = audio_player_device{} # صوت الغليان أو القلي
+    @editable LevelUpPopup : popup_dialog_device = popup_dialog_device{}
+    @editable SummaryPopup : popup_dialog_device = popup_dialog_device{}
+
+   # زر الشاحنة لأخذ الفحم
+    @editable GetCoalButton : button_device = button_device{}
+    # جهاز منح الفحم
+    @editable CoalGranter : item_granter_device = item_granter_device{}
+    # زر التسليم المشروط (عند مطعم المشاوي)
+    @editable CoalDeliveryButton : conditional_button_device = conditional_button_device{}
+    # مبلغ المكافأة
+    @editable CoalRewardAmount : int = 30
+    
+
+
+    # --- أجهزة أحداث المواقع ---
+    @editable RadarPark : map_indicator_device = map_indicator_device{}
+    @editable RadarSchool : map_indicator_device = map_indicator_device{}
+    
+
+    # أزرار الحديقة (نضع زرين لأن الحدث يطلب صنفين)
+    @editable ParkConditionButtons : []conditional_button_device = array{}
+    # أزرار المدرسة
+    @editable SchoolConditionButtons : []conditional_button_device = array{}
+    # رسبنة السيارات 
+    
+
+    
+    # --- متغيرات الحدث الجديد ---
+    var IsEventActive : logic = false          # هل يوجد حدث اليوم؟
+    var CurrentEventLocation : string = ""      # اسم المكان (حديقة أو مدرسة)
+    
+    # مصفوفة ستحتفظ بالطلبين المختارين لحدث اليوم
+    var ActiveEventReqs : [int]event_requirement = map{} 
+
+    
+    @editable EventBoxGranter : item_granter_device = item_granter_device{} # يمنح "كرتونة الطلبية الكاملة"
+    @editable EventRewardAmount : int = 400 # المبلغ الافتراضي للحدث الكبير
+    # تعريف عام يزبط لأي مركبة (سيارة، دراجة، إلخ)
+    @editable VehicleSpawner : vehicle_spawner_dirtbike_device = vehicle_spawner_dirtbike_device{}
+
+    @editable DistrictNames : []string = array{"حي الياسمين 🌸", "حي النخيل 🌴", "حي المرتفعات 🏔️"}
+
+
+
+    var PreparedItemsCount : int = 0
+
+    # ---- إحصائيات اليوم ----
+    var DayEventsCount : int = 0
+
+    var ProductSubscriptions : []cancelable = array{}
+
+    var ClockTextBlock : text_block = text_block{DefaultTextColor := NamedColors.White}
+    var ClockCanvas : ?canvas = false
+
+    var CurrentOrder : ?active_order = false
+    var MaybePlayerUI : ?canvas = false
+    var ReputationUI : ?canvas = false
+    # أضف هذه المتغيرات في كلاس الجهاز الرئيسي
+    var StepTimeRemaining : float = 10.0
+    var CurrentStageName : string = "انتظار"
+    
+    # إحصائيات اللاعب
+    var PlayerMoney : int = 0
+    var Reputation : float = 0.0
+    var PlayerLevel : int = 1
+    var CompletedOrders : int = 0 
+    var TimeUpgradeLevel : int = 0
+    var BonusUpgradeLevel : int = 0
+    # النجوم 
+    
+    var TotalDeliveries : int = 0 # عدد التوصيلات لحساب المتوسط
+    # تطويرات العامل
+    var HeatBagLevel : int = 0
+    @editable HeatBagBonusSeconds : float = 15.0
+    # رخص القيادة
+    var HasScooterLicense : logic = false
+
+    @editable ScooterPrice : int = 1500
+    @editable HeatBagPrice : int = 800
+
+    var NextLevelThreshold : int = 5 # نبدأ بطلبين للمستوى الأول
+    var IsShopOpen : logic = false
+    var IsWaitingForReadyPress : logic = false # هل ننتظر ضغطة زر "متاح"؟
+
+   
+    # --- تطويرات المخزن ---
+    var WarehouseLevel : int = 1 # مستوى المخزن
+    var GlobalMaxCapacity : int = 50 # سعة المخزن الكاملة الافتراضية
+    var CurrentTotalStock : int = 0 # مجموع الستوك الحالي 
+    
+    # السعر الأساسي للتطوير
+    BaseUpgradeCost : int = 200
+    var LastAptID : int = -1
+    var IsTimerRunning : logic = false 
+    # هل اللاعب اشترى الميزة؟
+    var IsVIPPurchased : logic = false 
+    # عداد الطلبات العادية قبل ما يجي VIP
+    var NormalOrderCount : int = 0
+    # متى يظهر الـ VIP (رقم عشوائي بين 5 و 10)
+    var NextVIPTarget : int = 5
+    # مصفوفة شقق الـ VIP (اربطها من الـ UEFN)
+    @editable RequiredVIPLevel : int = 2 # المستوى المطلوب لشراء الـ VIP (تقدر تغيره من UEFN)
+    @editable VIPApartments : []apartment_zone = array{}
+    @editable
+    var VIPPrice : int = 1
+    var UIBuyButtons : [button_loud]int = map{} # ماب بتربط كل زر UI بالـ Index تاعه
+    var ItemsPickedInCurrentOrder : [string]logic = map{}
+
+    var UpgradesTab : stack_box = stack_box{Orientation := orientation.Horizontal}
+    var PurchasesTab : stack_box = stack_box{Orientation := orientation.Vertical}
+    var BillsTab : stack_box = stack_box{Orientation := orientation.Horizontal}
+    var ProductsTab : stack_box = stack_box{Orientation := orientation.Vertical}
+    var PageWidgets : []stack_box = array{}
+
+    # هذا هو المخزن الذي سيحمي الماوس من الـ Reset
+    var ProductsContainer : [player]canvas = map{}
+    var ConfirmLayer : overlay = overlay{}
+    var SummaryUIElements : [player]canvas = map{}
+    # ماب لربط كل لاعب بحالة التطويرات الخاصة به (تمنع تداخل اللاعبين وتسمح بالحفظ)
+    var SpeedUpgradeMap : weak_map(player, logic) = map{}
+    var ScooterUnlockedMap : weak_map(player, logic) = map{}
+    var VehicleUnlockedMap : weak_map(player, logic) = map{}
+    var RadarUpgradeMap : weak_map(player, logic) = map{}
+    var VIPPurchasedMap : weak_map(player, logic) = map{}
+    
+    var StatusTextBlock : text_block = text_block{}
+    var PendingIndex : int = 0
+
+    
+    var StatusTextWidget : text_block = text_block{}
+
+    var WelcomeUICanvasMap : [player]?canvas = map{}  # مخزن مؤقت لحفظ واجهة الترحيب لكل لاعب عشان نقدر نحذفها لما يضغط الزر
+
+    
+
+    # ===============================================
+    # زر يمنح تنكة الوقود 
+    # ===============================================
+    @editable FuelButton1 : button_device = button_device{}
+    
+    @editable ItemGranterFuel : item_granter_device = item_granter_device{}
+
+
+
+    @editable OpenShopVbucksButton : button_device = button_device{}    
+    
+    
+    
+    
+    
+    
+    
+
+    # --- دالة البداية الصحيحة ---
+    OnBegin<override>()<suspends>: void =
+        OpenShopVbucksButton.InteractedWithEvent.Subscribe(HandleOpenShopRequest)
+ 
+        # ----- احذفة اختباااااار ----------- 
+        
+        TestButtonDevice.InteractedWithEvent.Subscribe(OnTestButtonInteracted)
+
+
+        # نظام زر اعطاء تنكة الوقود 
+
+        FuelButton1.InteractedWithEvent.Subscribe(HandleItemPurchase)
+       
+        
+        # زر دفع لفتح محطو الوقود
+        MyButton1.InteractedWithEvent.Subscribe(HandlePayment)
+        MyButton2.InteractedWithEvent.Subscribe(HandlePayment)
+        
+        # تعطيل المحطة فور خروج السيارة
+        MyStation.Disable()
+        MyStation.VehicleExitedEvent.Subscribe(ResetStation)
+
+        
+        
+        
+
+
+
+
+
+        ShopSwitch.TurnedOnEvent.Subscribe(OnShopOpened)
+        ShopSwitch.TurnedOffEvent.Subscribe(OnShopClosed)
+        ComputerInteraction.InteractedWithEvent.Subscribe(HandleComputerInteraction)
+        NextOrderButton.InteractedWithEvent.Subscribe(OnNextOrderPressed)
+
+        BuySpeedButton.InteractedWithEvent.Subscribe(OnBuySpeed)
+        
+        Print("🚀 نظام التوصيل بدأ العمل!")
+
+       
+        
+      
+        
+        
+            
+
+        # ربط الأزرار
+        
+        
+        PackagingButton.InteractedWithEvent.Subscribe(OnPackagingButtonClicked)
+        
+        
+        CookingButton.InteractedWithEvent.Subscribe(OnStartCooking)
+        GetCoalButton.InteractedWithEvent.Subscribe(OnGetCoalPressed)
+        for (Btn : ParkConditionButtons):
+            Btn.ActivatedEvent.Subscribe(OnEventItemDelivered)
+        for (Btn : SchoolConditionButtons):
+            Btn.ActivatedEvent.Subscribe(OnEventItemDelivered)
+
+        
+            
+    
+        
+        # ربط زر تسليم الفحم وقبض الثمن
+        CoalDeliveryButton.ActivatedEvent.Subscribe(OnCoalDelivered)
+
+        
+            
+
+
+         # 2. ربط الأزرار بنظام المراقب اللي عملناه (spawn)
+        for (Index -> FoodItem : FoodMenu):
+            spawn:
+                AwaitButtonPress(FoodItem.Button, Index)
+
+
+        # الربط الصحيح للأزرار المشروطة
+        # الربط الاحترافي للأزرار المشروطة
+        AllDeliveryApts := Apartments + VIPApartments 
+
+        for (Apt : AllDeliveryApts):
+            Apt.CondButton.Disable() # إطفاء الكل في البداية
+            spawn{ AwaitAptPress(Apt) } # الآن مبنى 100 صار لها "مراقب" يسمع ضغطتها
+            Print("✅ تم تفعيل المراقبة المنزل رقم: {Apt.ApartmentID}")
+
+        Sleep(0.5)
+
+
+        # الحصول على كل اللاعبين الحاليين وتحميل بياناتهم
+        AllPlayers := GetPlayspace().GetPlayers()
+        for (Player : AllPlayers):
+           
+            # تحميل البيانات بعد الاستراحة يضمن أن السيرفر "صحصح"
+            LoadPlayerData(Player)
+            OnPlayerAdded(Player) # يفضل الترتيب هكذا: حمل ثم أضف للـ UI
+            UpdateUI(Player)
+
+        # 3. ربط الأحداث المهمة
+        GetPlayspace().PlayerAddedEvent().Subscribe(OnPlayerAdded)
+        GetPlayspace().PlayerRemovedEvent().Subscribe(OnPlayerLeft)
+
+        # تحديث الحالة العامة
+        UpdateButtonsState()
+
+    
+    
+    
+
+    OnOpenShopClicked(Agent : agent):void=
+        if (InPlayer := player[Agent]):
+            spawn{ ShowMoneyShop(InPlayer) }
+
+    ShowMoneyShop(InPlayer : player)<suspends>:void=
+        # عرض العروض المتاحة للاعب
+        ShowOffersDialog(InPlayer, array{MoneyOffers.SmallOffer{},MoneyOffers.MediumOffer{}, MoneyOffers.LargeOffer{}})
+
+    # مراقبة عمليات الشراء
+    SubscribeToPurchases(InPlayer : player):void=
+        GetEntitlementsChangedEvent(InPlayer, MoneyProducts.island_money_products).Subscribe(OnMoneyPurchased)
+
+    # الدالة التي تنفذ عند اكتمال الدفع بالفيبوكس
+    OnMoneyPurchased(Result : tuple(player, []entitlement_change(entitlement))): void=
+        InPlayer := Result(0)
+        for (Change : Result(1)):
+            Entitlement := Change.Entitlement
+            
+            # إذا اشترى الحزمة الصغيرة
+            if (MoneyProducts.SmallMoney[Entitlement]):
+                if (Change.Quantity > 0):
+                    # نستخدم دالتك الأصلية لزيادة المال
+                    void(ChangeMoney(InPlayer, 500))
+                    Print("✅ تم شراء 500$ بنجاح!")
+            
+            # إذا اشترى الحزمة المتوسطة
+            else if (MoneyProducts.MediumMoney[Entitlement]):
+                if (Change.Quantity > 0):
+                    void(ChangeMoney(InPlayer, 1200))
+                    Print("✅ تم شراء 1,200$ بنجاح!")
+
+             # إذا اشترى الحزمة الكبيرة
+            else if (MoneyProducts.LargeMoney[Entitlement]):
+                if (Change.Quantity > 0):
+                    void(ChangeMoney(InPlayer, 3500))
+                    Print("✅ تم شراء 3,500$ بنجاح!")
+
+
+
+
+    HandleOpenShopRequest(InAgent : agent):void=
+        if (InPlayer := player[InAgent]):
+            # نستخدم spawn لأن دالة ShowOffersDialog تحتاج إلى وقت (Suspends)
+            spawn { ShowShopUI(InPlayer) }
+
+    ShowShopUI(InPlayer : player)<suspends>:void=
+        # هنا نضع العروض التي عرفناها في موديول MoneyOffers
+        ShowOffersDialog(InPlayer, array{
+            MoneyOffers.SmallOffer{},
+            MoneyOffers.MediumOffer{},
+            MoneyOffers.LargeOffer{}
+        })
+  
+    # --- 1. دالة إنشاء الواجهة وإظهارها ---
+    ShowWelcomeUI(InPlayer : player):void=
+        if (PlayerUI := GetPlayerUI[InPlayer]):
+            
+            # 1. إطار خارجي نحيف جداً بلون ذهبي (بدون خلفية تغطي الشاشة)
+            GoldBorder := color_block{DefaultColor := NamedColors.Gold, DefaultDesiredSize := vector2{X := 760.0, Y := 510.0}}
+            
+            # 2. جسم الواجهة  
+            GlassFrame := color_block{DefaultColor := NamedColors.Black, DefaultDesiredSize := vector2{X := 750.0, Y := 500.0}}
+
+            WelcomeTitle := text_block{DefaultText := TextToMsg("✨ مرحباً بك في مطعمك ✨"), DefaultTextColor := NamedColors.Gold}
+            
+            InstructionText := text_block:
+
+                DefaultText := TextToMsg("خطواتك الأولى للنجاح:\n\n" + 
+
+                                        "1️⃣. اذهب للحاسوب 💻 ثم 'المنتجات' واشترِ (سلطة فواكه).\n" +
+
+                                        "2️⃣. افتح المحل 🔓 وانتظر وصول أول طلب لك.\n" +
+
+                                        "3️⃣. توجه للمطبخ لتحضير الطعام وتغليفه جيداً 📦.\n" +
+
+                                        "4️⃣. اذهب للشقة المطلوبة وسلم الطلب لاعطاء مكافاتك💰.")
+
+                DefaultShadowOffset := option{vector2{X := 1.5, Y := 1.5}}
+                DefaultTextColor := NamedColors.White
+
+            StartBtn := button_loud{DefaultText := TextToMsg("فهمت، ابدأ الآن!")}
+            
+            StartBtn.OnClick().Subscribe(OnStartButtonClicked)
+
+            MyWelcomeCanvas := canvas:
+                Slots := array:
+                    # طبقة الإطار الذهبي
+                    canvas_slot:
+                        Widget := GoldBorder
+                        ZOrder := 1
+                        Anchors := anchors{Minimum := vector2{X := 0.5, Y := 0.5}, Maximum := vector2{X := 0.5, Y := 0.5}}
+                        Alignment := vector2{X := 0.5, Y := 0.5}
+
+                    # طبقة الزجاج الشفاف (يظهر من خلفها الماب)
+                    canvas_slot:
+                        Widget := GlassFrame
+                        ZOrder := 2
+                        Anchors := anchors{Minimum := vector2{X := 0.5, Y := 0.5}, Maximum := vector2{X := 0.5, Y := 0.5}}
+                        Alignment := vector2{X := 0.5, Y := 0.5}
+
+                    # النصوص والأزرار
+                    canvas_slot:
+                        Widget := WelcomeTitle
+                        ZOrder := 3
+                        Anchors := anchors{Minimum := vector2{X := 0.5, Y := 0.38}, Maximum := vector2{X := 0.5, Y := 0.38}}
+                        Alignment := vector2{X := 0.5, Y := 0.5}
+                
+
+                    canvas_slot:
+                        Widget := InstructionText
+                        ZOrder := 3
+                        Anchors := anchors{Minimum := vector2{X := 0.5, Y := 0.52}, Maximum := vector2{X := 0.5, Y := 0.52}}
+                        Alignment := vector2{X := 0.5, Y := 0.5}
+
+                    canvas_slot:
+                        Widget := StartBtn
+                        ZOrder := 3
+                        Anchors := anchors{Minimum := vector2{X := 0.5, Y := 0.68}, Maximum := vector2{X := 0.5, Y := 0.68}}
+                        Alignment := vector2{X := 0.5, Y := 0.5}
+                        SizeToContent := true
+
+            if (set WelcomeUICanvasMap[InPlayer] = option{MyWelcomeCanvas}):
+                # إضافة الواجهة مع الماوس وبدون تعطيل رؤية اللعبة
+                PlayerUI.AddWidget(MyWelcomeCanvas, player_ui_slot{InputMode := ui_input_mode.All})
+
+    # --- 2. الدالة التي تنفذ عند ضغط الزر (منفصلة تماماً) ---
+    OnStartButtonClicked(Message : widget_message):void=
+        InPlayer := Message.Player
+        if (PlayerUI := GetPlayerUI[InPlayer]):
+            # حذف الواجهة من الشاشة
+            if (PlayerCanvas := WelcomeUICanvasMap[InPlayer]?):
+                PlayerUI.RemoveWidget(PlayerCanvas)
+                # تنظيف الـ Map
+                var TempMap : [player]?canvas = WelcomeUICanvasMap
+                if (set WelcomeUICanvasMap[InPlayer] = false):
+                    Print("👋 تم إغلاق شاشة الترحيب")
+
+    StartMasterTimer(InPlayer : player)<suspends>:void=
+        if (IsTimerRunning = true): 
+            return 
+        set IsTimerRunning = true
+        
+        loop:
+            Sleep(1.0)
+            if (Order := CurrentOrder?):
+                set StepTimeRemaining -= 1.0
+                
+                # --- عندما يصل الوقت للصفر ---
+                if (StepTimeRemaining <= 0.0):
+                    if (Stats := SavedPlayerData[InPlayer]):
+                        
+                        # 1️⃣ الحالة الأولى: إذا كان في مرحلة التوصيل (إلغاء فوري)
+                        if (CurrentStageName = "توصيل الطلب 🚚"):
+                            # إلغاء الطلب وحذف الصندوق
+                            set CurrentOrder = false 
+                            ItemRemover.Remove(InPlayer) 
+                            
+                            # عقوبة التوصيل (خصم أكبر لأن الزبون انتظر طويلاً)
+                            PenaltyMoney := 15
+                            PenaltyRep := 5.0
+                            set PlayerMoney -= PenaltyMoney # يسمح ان يصبح المال بالسالب 
+                            
+        
+                            SavePlayerData(InPlayer)
+
+                            HUDMessage.SetText(TextToMsg("❌ انتهى وقت التوصيل! ألغى الزبون الطلب."))
+                            HUDMessage.Show(InPlayer)
+                            
+                            set CurrentStageName = "انتظار طلب جديد..."
+                            set IsTimerRunning = false
+                            UpdateUI(InPlayer)
+                            UpdateButtonsState()
+                            break # إنهاء العداد تماماً
+
+                        # 2️⃣ الحالة الثانية: إذا كان في التحضير أو الطبخ (يعطيه وقت إضافي)
+                        # 2️⃣ الحالة الثانية: إذا كان في التحضير أو الطبخ (يعطيه وقت إضافي)
+                        else:
+                            PenaltyMoney := 5
+                            set PlayerMoney -= PenaltyMoney
+                            
+                            # --- أضف الحفظ هنا أيضاً ---
+                            SavePlayerData(InPlayer) 
+                            # -------------------------
+
+                            set StepTimeRemaining = 30.0 
+                            HUDMessage.SetText(TextToMsg("⚠️ أسرع في التحضير! خصم 5$"))
+                            HUDMessage.Show(InPlayer)
+                            UpdateUI(InPlayer)
+                
+                UpdateUI(InPlayer)
+            else:
+                set IsTimerRunning = false
+                set CurrentStageName = "انتظار طلب جديد..."
+                set StepTimeRemaining = 0.0
+                UpdateUI(InPlayer)
+                break
+                
+   
+
+        
+
+    
+    # دالة ذكية لتغيير المال (سواء خصم أو إضافة) مع المزامنة
+    ChangeMoney(InAgent: agent, Amount: int) : logic =
+        if (InPlayer := player[InAgent]):
+            # 1. نحسب القيمة الجديدة بناءً على المتغير الحي في الكود
+            NewMoney := PlayerMoney + Amount
+            
+            # 2. نتحقق إذا كان المبلغ الجديد مسموحاً به
+            if (NewMoney >= 0):
+                # تحديث المتغير الحي (ضروري جداً قبل استدعاء الحفظ)
+                set PlayerMoney = NewMoney
+                
+                # 3. استدعاء الحفظ الشامل (سيأخذ قيمة PlayerMoney الجديدة ويحفظها)
+                SavePlayerData(InPlayer)
+                
+                # 4. تحديث الواجهة فوراً
+                UpdateUI(InPlayer)
+                
+                return true
+        return false
+
+
+
+        # دالة خاصة لشراء الاغراض ب 10
+    HandlePayment(InPlayer : agent):void=
+        # 1. نتحقق أولاً إذا كان مع اللاعب المال الكافي (10$)
+        if (PlayerMoney >= 10):
+            # 2. ننفذ الخصم والحفظ (نستدعي الدالة كأمر مستقل بدون ?)
+            void(ChangeMoney(InPlayer, -10))
+            
+            # لا نحتاج لـ set PlayerMoney -= 10 هنا لأن ChangeMoney تفعل ذلك بداخلها
+            
+            # 3. تفعيل المحطة
+            spawn { ActivateStationWithDelay() }
+            
+            Print("⛽ تم الخصم بنجاح! جاري تشغيل المحطة...")
+        else:
+            # 4. إذا كان المال غير كافٍ
+            Print("❌ رصيدك غير كافٍ")
+
+
+    # دالة خاصة لشراء الأغراض بـ 20$
+    HandleItemPurchase(InAgent : agent):void=
+        if (InPlayer := player[InAgent]):
+            # 1. التحقق من السعر
+            if (PlayerMoney >= 20):
+                # 2. تنفيذ الخصم والحفظ والتحديث (تأكد أن ChangeMoney تستدعي SavePlayerData)
+                void(ChangeMoney(InPlayer, -20))
+                
+                # 3. منح الغرض فوراً
+                ItemGranterFuel.GrantItem(InPlayer)
+
+                # 4. تحديث حالة الوقود برمجياً عشان تنحفظ
+                # هنا نفترض أن عندك متغير عام اسمه PlayerHasFuel
+                set PlayerHasFuel = 1 
+                
+                # 5. استدعاء الحفظ يدوياً لضمان تسجيل أن معه وقود
+                SavePlayerData(InPlayer)
+                    
+                Print("🛍️ تم شراء الوقود وحفظ ملكيته!")
+            else:
+                Print("❌ لا تملك 20$ لشراء هذا الغرض")
+
+
+
+# دالة مساعدة لضمان استيقاظ المحطة
+    ActivateStationWithDelay()<suspends>:void=
+        MyStation.Disable() # نطفئها أولاً للتأكد
+        Sleep(0.1)          # ننتظر جزء بسيط جداً من الثانية (هذا هو الحل!)
+        MyStation.Enable()  # نشغلها الآن، المحرك سيشعر بالتغيير حتماً
+        
+        # تأكيد إضافي إذا كانت السيارة بالداخل
+        if (MyStation.IsAnyVehicleInside[]):
+            Print("🚗 السيارة مكتشفة! الوقود يعمل الآن.")
+                    
+    # دالة التعطيل عند الخروج
+    ResetStation(Vehicle : fort_vehicle):void=
+        if (not IsCountingDown?): # نضمن أنه لا يوجد عداد يعمل حالياً
+            set IsCountingDown = true
+            spawn{ WaitAndDisable() }
+            Print("⚠️ بدأت مهلة الـ 10 ثواني...")
+
+    WaitAndDisable()<suspends>:void=
+        Sleep(10.0) 
+        set IsCountingDown = false # انتهى العداد
+        
+        # التحقق النهائي والأهم
+        if (not MyStation.IsAnyVehicleInside[]):
+            MyStation.Disable()
+            Print("🔒 تم الإغلاق.")
+        else:
+            Print("✅ تم إلغاء الإغلاق لوجود مركبة.")
+
+
+        
+       
+    
+
+    OnPackagingButtonClicked(InAgent : agent) : void =
+    # تأكد من عدم وجود مسافة بين اسم الدالة والقوس
+        spawn{OnPackagingPressed(InAgent)}
+    
+
+    LoadPlayerData(InPlayer : player):void=
+        # نحاول قراءة البيانات من المخزن الدائم
+        if (LoadedStats := SavedPlayerData[InPlayer]):
+            # 1. إذا وجدنا بيانات (لاعب قديم) - الكود الأصلي الخاص بك
+            set PlayerMoney = LoadedStats.Money
+            set PlayerLevel = LoadedStats.Level
+            set DayCount = LoadedStats.CurrentDay
+            set CompletedOrders = LoadedStats.TotalOrders
+            set DebtElectricity = LoadedStats.SavedDebtElectricity
+            set DebtRent = LoadedStats.SavedDebtRent
+            set Reputation = LoadedStats.SavedReputation
+            set TotalDeliveries = LoadedStats.SavedTotalDeliveries
+            
+            
+            # تحميل التطويرات (الكود الأصلي)
+            set PrepLevel = LoadedStats.SavedPrepLevel
+            set CookLevel = LoadedStats.SavedCookLevel
+            set PackLevel = LoadedStats.SavedPackLevel
+            set HasRadarUpgrade = LoadedStats.HasRadarUpgrade
+            set IsVIPPurchased = LoadedStats.IsVIPPurchased
+            set BonusDeliveryTime = LoadedStats.SavedBonusTime
+            set PlayerHasFuel = LoadedStats.HasFuel
+            set NextLevelThreshold = LoadedStats.SavedLevelThreshold
+
+            if (PlayerHasFuel > 0):
+                ItemGranterFuel.GrantItem(InPlayer)
+                Print("⛽ تم منح اللاعب الوقود المحفوظ في حقيبته")
+
+
+            # --- [ الإضافات الجديدة للتحميل ] ---
+
+            # 1. تحميل المخزون لكل صنف طعام
+            for (Index -> StockValue : LoadedStats.InventoryStocks):
+                if (Item := FoodMenu[Index]):
+                    set Item.Stock = StockValue
+            
+            # 2. تحميل حالات الشراء للمركبات والسرعة في الـ Maps
+            
+            if (set RadarUpgradeMap[InPlayer] = LoadedStats.HasRadarUpgrade) {}
+            if (set VIPPurchasedMap[InPlayer] = LoadedStats.IsVIPPurchased) {}
+
+            UpdateButtonsState()
+
+            Print("📥 تم استعادة بياناتك، مخزنك، ومركباتك بنجاح!")
+
+        else:
+            # 2. إذا لم نجد بيانات (لاعب جديد لأول مرة)
+            # نقوم بتعريف البيانات الابتدائية ونضع فيها ID السيارة المجانية (مثلاً 0)
+            InitialStats := player_stats{
+                Money := 120,             # المبلغ الابتدائي
+                Level := 1,               # الليفل الابتدائي
+                SavedOwnedCars := array{0}      # السيارة المجانية (ID: 0)
+            } 
+            
+            # تحديث المتغيرات الحية في اللعبة من البيانات الابتدائية
+            set PlayerMoney = InitialStats.Money
+            set PlayerLevel = InitialStats.Level
+            set DayCount = InitialStats.CurrentDay
+            
+            # نحفظ البيانات في السيرفر فوراً
+            if (set SavedPlayerData[InPlayer] = InitialStats):
+                Print("🆕 أهلاً بك! تم منحك سيارة مجانية و 120$")
+
+        # تحديث الواجهة لتظهر الفلوس والسيارة المملوكة
+        UpdateUI(InPlayer)
+
+
+    SavePlayerData(InPlayer : player):void=
+        # 1. تحويل مخزون الطعام لقائمة أرقام
+        var TempStocks : []int = array{}
+        for (Item : FoodMenu):
+            set TempStocks += array{Item.Stock}
+    
+        # 2. جلب الحالات الخاصة من الخرائط أو تعيين false
+        IsSpeedActive := SpeedUpgradeMap[InPlayer] or false
+        IsScooterActive := ScooterUnlockedMap[InPlayer] or false
+        IsVehicleActive := VehicleUnlockedMap[InPlayer] or false
+        IsRadarActive := RadarUpgradeMap[InPlayer] or false
+        IsVIPActive := VIPPurchasedMap[InPlayer] or false
+    
+        # 3. السيارات المملوكة حالياً (أو فارغ)
+        CurrentOwnedCars := if (Stats := SavedPlayerData[InPlayer]) then Stats.SavedOwnedCars else array{}
+    
+        # 4. تجهيز بيانات الحفظ النهائي
+        NewStats := player_stats {
+            Money := PlayerMoney
+            Level := PlayerLevel
+            CurrentDay := DayCount
+            TotalOrders := CompletedOrders
+            SavedTotalDeliveries := TotalDeliveries
+            SavedBonusTime := BonusDeliveryTime
+            SavedDebtElectricity := DebtElectricity
+            SavedDebtRent := DebtRent
+            SavedReputation := Reputation
+            SavedPrepLevel := PrepLevel
+            SavedCookLevel := CookLevel
+            SavedPackLevel := PackLevel
+            HasRadarUpgrade := IsRadarActive
+            IsVIPPurchased := IsVIPActive
+            HasSpeedUpgrade := IsSpeedActive
+            HasScooterUnlocked := IsScooterActive
+            HasVehicleUnlocked := IsVehicleActive
+            InventoryStocks := TempStocks
+            SavedWarehouseLevel := WarehouseLevel
+            SavedGlobalMaxCapacity := GlobalMaxCapacity
+            SavedOwnedCars := CurrentOwnedCars
+            HasFuel := PlayerHasFuel
+            SavedLevelThreshold := NextLevelThreshold
+        }
+    
+        # 5. الحفظ في السيرفر (خريطة دائمة)
+        if (set SavedPlayerData[InPlayer] = NewStats):
+            Print("💾 تم حفظ كل شيء بنجاح!")
+
+
+
+
+    
+
+
+
+        # دالة لجلب فلوس اللاعب من الذاكرة الدائمة
+    GetPlayerMoney(InPlayer : player) : int =
+        if (CurrentStats := SavedPlayerData[InPlayer]):
+            return CurrentStats.Money
+        else:
+            return 120 # إذا لاعب جديد نعطيه 120
+
+    # دالة الضغط على زر الشاحنة
+    OnGetCoalPressed(InAgent : agent):void=
+        CoalGranter.GrantItem(InAgent)
+        Print("📦 تم استلام كيس الفحم من الشاحنة")
+
+    # دالة تسليم الفحم للمحل الثاني
+    OnCoalDelivered(InAgent : agent):void=
+        # 1. زيادة المال في المتغير
+        set PlayerMoney += CoalRewardAmount
+        
+        # 2. تحديث الواجهة UI والحفظ
+        if (InPlayer := player[InAgent]):
+            UpdateUI(InPlayer)
+            SavePlayerData(InPlayer) # <--- حطها هنا عشان تضمن الفلوس انحفظت بجيته
+            
+        # 3. رسالة تأكيد
+        Print("✅ أحسنت! سلمت الفحم واستلمت {CoalRewardAmount}$")
+
+    # دالة يتم استدعاؤها عند تفعيل الزر المشروط بنجاح
+    # هذه الدالة تربطها بحدث ActivatedEvent للزر المشروط في UEFN
+    OnEventItemDelivered(InAgent : agent):void=
+        if (InPlayer := player[InAgent]):
+            # 1. منح الجائزة (القيمة بتعتمد على شو أنت حاطط في EventRewardAmount)
+            set PlayerMoney += EventRewardAmount 
+           
+           
+           
+            set CompletedOrders += 1  # يزيد العداد الكلي الدائم
+            set DayOrdersCount += 1   # ينحسب ضمن طلبات اليوم (طلب مستلم)
+            set DayEventsCount += 1   # ينحسب في خانة التحديات العشوائية
+            
+            # 2. إنهاء حالة الحدث وتصفير البيانات
+            set IsEventActive = false
+            set ActiveEventReqs = map{} 
+            CleanupEvent()
+            
+            # 3. إغلاق الردارات وأجهزة المواقع
+            RadarPark.Disable()
+            RadarSchool.Disable()
+            
+            # إغلاق كل أزرار الحدث
+            for (Btn : ParkConditionButtons) do Btn.Disable()
+            for (Btn : SchoolConditionButtons) do Btn.Disable()
+            
+            # إغلاق زر التوصيل الوحيد
+            
+
+            # 4. رسالة النجاح (بتظهر المبلغ اللي أنت حددته)
+            EventAccolade.Award(InPlayer) # منح XP الحدث الكبير
+            SuccessMessageText : message = TextToMsg("🎊 أحسنت! سلمت الطلبية واستلمت {EventRewardAmount}$ مكافأة!")
+            HUDMessage.SetText(SuccessMessageText)
+            HUDMessage.Show(InPlayer)
+            
+            # 5. العودة للحياة الطبيعية في المطعم
+            NextOrderButton.Enable()
+            UpdateButtonsState() 
+            UpdateUI(InPlayer)
+            SavePlayerData(InPlayer)
+            Print("✅ تم إنهاء الحدث بنجاح.")
+                        
+   
+            
+    # دالة تقرر إذا كان هناك حدث اليوم وتختار الطلبات
+    CheckForSpecialEvent(InPlayer : player):void=
+        # 1. قرعة لاختيار وجود حدث (احتمال 10%)
+        RandomRoll := GetRandomInt(1, 10) # احتمال حدوث حدث كل 10 ايام
+        
+        if (RandomRoll = 2):
+            set IsEventActive = true
+            
+            # 2. اختيار المكان (1 حديقة، 2 مدرسة)
+            LocationRoll := GetRandomInt(1, 2)
+            if (LocationRoll = 1):
+                set CurrentEventLocation = "الحديقة 🌳"
+                RadarPark.Enable()
+                RadarSchool.Disable()
+                
+                for (Btn : ParkConditionButtons) do Btn.Enable()
+                for (Btn : SchoolConditionButtons) do Btn.Disable()
+                Print("📍 موقع الحدث: الحديقة - تم تفعيل الأزرار المشروطة هناك.")
+
+            else:
+                set CurrentEventLocation = "المدرسة 🏫"
+                RadarSchool.Enable()
+                RadarPark.Disable()
+
+                for (Btn : SchoolConditionButtons) do Btn.Enable()
+                for (Btn : ParkConditionButtons) do Btn.Disable()
+                Print("📍 موقع الحدث: المدرسة - تم تفعيل الأزرار المشروطة هناك.")
+
+            # --- [تعديل الفلترة الذكية للأصناف] ---
+            # ننشئ قائمة جديدة تحتوي فقط على الطعام المتاح للاعب حالياً
+            var AvailableForEvent : []food_item = array{}
+            for (Food : FoodMenu):
+                # الشرط: لفل اللاعب كافي + يوجد مخزون كافي (على الأقل 5 حبات للحدث)
+                if (PlayerLevel >= Food.RequiredLevel and Food.Stock >= 5):
+                    set AvailableForEvent = AvailableForEvent + array{Food}
+
+            # 3. اختيار صنفين عشوائيين من الأصناف "المتاحة فقط"
+            if (AvailableForEvent.Length >= 2):
+                Index1 := GetRandomInt(0, AvailableForEvent.Length - 1)
+                
+                var Index2 : int = GetRandomInt(0, AvailableForEvent.Length - 1)
+                loop:
+                    if (Index2 = Index1):
+                        set Index2 = GetRandomInt(0, AvailableForEvent.Length - 1)
+                    else:
+                        break 
+
+                if (Item1 := AvailableForEvent[Index1], Item2 := AvailableForEvent[Index2]):
+                    # تعيين الطلبات (المقدار المطلوب 5 كما طلبت)
+                    if (set ActiveEventReqs[0] = event_requirement{FoodName := Item1.FoodName, RequiredAmount := 5, CurrentBatchCount := 0, IsCookedCount := 0, IsFullyPacked := false}) {}
+                    if (set ActiveEventReqs[1] = event_requirement{FoodName := Item2.FoodName, RequiredAmount := 5, CurrentBatchCount := 0, IsCookedCount := 0, IsFullyPacked := false}) {}
+
+                    # --- تحديث الأزرار المشروطة برمجياً ---
+                    SelectedButtons := if (LocationRoll = 1) then ParkConditionButtons else SchoolConditionButtons
+                    
+                    if (Btn1 := SelectedButtons[0], Btn2 := SelectedButtons[1]):
+                        Btn1.Enable()
+                        Btn2.Enable()
+                
+                HUDMessage.SetText(TextToMsg("📢 حدث اليوم: {CurrentEventLocation}! افتح القائمة لرؤية الطلبات."))
+                HUDMessage.Show(InPlayer)
+                UpdateButtonsState() # تحديث الأزرار فوراً
+                UpdateUI(InPlayer)   # تحديث الشاشة فوراً
+                Print("✅ الحدث الخاص بدأ بنجاح!")
+
+            else:
+                # إذا لم يجد الكود صنفين متاحين (مثلاً اللاعب لفل 1 ومعوش بضاعة)
+                Print("⚠️ لم يتم تفعيل الحدث: لا يوجد أصناف كافية في المخزن أو المستوى منخفض.")
+                set IsEventActive = false
+                # نلغي تفعيل الرادارات التي فتحناها في الأعلى
+                RadarPark.Disable()
+                RadarSchool.Disable()
+
+        else:
+            # إذا لم تنجح القرعة، نطفئ كل شيء
+            set IsEventActive = false
+            RadarPark.Disable()
+            RadarSchool.Disable()
+            for (Btn : ParkConditionButtons) do Btn.Disable()
+            for (Btn : SchoolConditionButtons) do Btn.Disable()
+
+        
+   
+    # دالة تصفير البيانات لبدء يوم جديد
+    ResetDayStats():void=
+        set DayEarnings = 0
+        set DayOrdersCount = 0
+        set DayEventsCount = 0 # تصفير عداد الأحداث لليوم الجديد
+        set DailySalesTracker = map{} # تصفير الماب (الأكثر مبيعاً)
+        set CurrentHour = 8            # إعادة الساعة لـ 8 صباحاً
+        set CurrentMinute = 0
+        Print("♻️ تم تصفير إحصائيات اليوم.. جاهز للبدء!")
+
+    StartClockLoop(InAgent : agent)<suspends>:void=
+        set CurrentHour = 8 
+        set CurrentMinute = 0
+        set IsShopOpen = true
+        
+        Print("☀️ بدأ يوم العمل! الساعة الآن 08:00 AM")
+        
+        loop:
+            if (IsShopOpen = false):
+                Print("⏰ توقف عداد الوقت بنجاح.")
+                break 
+            
+            Sleep(1.0) 
+
+            set CurrentMinute += 1
+            if (CurrentMinute >= 60):
+                set CurrentMinute = 0
+                set CurrentHour += 1
+                
+            UpdateClockUI(InAgent)
+
+            # --- التعديل هنا (الساعة 8 مساءً) ---
+            if (CurrentHour >= 20): 
+                # بدل ما ننهي اليوم فوراً، بنعطي تنبيه متكرر كل ساعة (باللعبة)
+                if (CurrentMinute = 0):
+                    # إظهار رسالة HUD للاعب تنبهه بانتهاء الوقت
+                    EndDayNotifyText := TextToMsg("🕒 الساعة 8 مساءً! انتهى الدوام، اذهب وأغلق المحل.")
+                    HUDMessage.SetText(EndDayNotifyText)
+                    HUDMessage.Show(InAgent)
+                    Print("📢 تنبيه: الوقت انتهى، بانتظار إغلاق المحل يدوياً.")
+                
+                # ملاحظة: شلنا الـ break والـ spawn عشان يضل اللاعب يتحرك براحته
+                # اليوم ما بينتهي إلا لما هو يضغط زر "إغلاق المحل"
+
+
+    # دالة تضمن ظهور الماوس عن طريق إعطاء وقت مستقطع للنظام
+    SafeEndDay(InAgent : agent)<suspends>:void=
+        Sleep(0.2) # تأخير بسيط جداً يحل مشكلة تعليق الماوس
+        EndTheDay(InAgent)
+
+    
+   
+        
+        Print("📋 تم عرض ملخص اليوم للاعب.")
+
+    EndTheDay(InAgent : agent):void=
+        set IsShopOpen = false
+
+                # الإيجار يبدأ بـ 80 ويزيد 40 كل لفل
+        var CalculatedRent : int = 40 + (PlayerLevel * 40) 
+
+        # الكهرباء تبدأ بـ 20 وتزيد 20 كل لفل
+        var CalculatedElectric : int = 0 + (PlayerLevel * 20)
+
+        # 1. تحديث الديون
+        set DebtElectricity += CalculatedElectric
+        set DebtRent += CalculatedRent
+        
+        # 2. زيادة رقم اليوم 
+        set DayCount += 1
+        
+        # (باقي كودك كما هو...)
+
+        # 3. الحفظ النهائي (أضفها هنا)
+        if (InPlayer := player[InAgent]):
+            DayCompleteAccolade.Award(InPlayer)
+            SavePlayerData(InPlayer) # <--- هنا الحفظ الحقيقي
+            ShowSummaryUI(InPlayer)
+            UpdateUI(InPlayer)
+        
+        # تنظيف وإغلاق
+        CleanupEvent()
+        set CurrentOrder = false
+        ItemRemover.Remove(InAgent)
+        ShopSwitch.TurnOff(InAgent)
+        UpdateButtonsState()
+            
+
+    # هذه الدالة التي سيناديها الزر
+    HandleNextDay(wm : widget_message):void=
+        Print("اللاعب ضغط الزر - جاري الحذف...") 
+        InPlayer := wm.Player
+        if (PlayerUI := GetPlayerUI[InPlayer]):
+            # البحث عن الواجهة المسجلة لهذا اللاعب وحذفها
+            if (OldSummary := SummaryUIElements[InPlayer]):
+                PlayerUI.RemoveWidget(OldSummary)
+                # تنظيف الماب بعد الحذف لضمان عدم حدوث تعليق مستقبلي
+                var TempMap : [player]canvas = SummaryUIElements
+                if (set SummaryUIElements[InPlayer] = canvas{}): # تصفير القيمة
+                    Print("تم حذف الواجهة بنجاح ✅")
+            
+            # تصفير بيانات اليوم وبدء الدورة الزمنية الجديدة
+            ResetDayStats()
+            UpdateUI(InPlayer)
+            
+           
+            
+    
+
+    ShowSummaryUI(InPlayer : player):void=
+        if (PlayerUI := GetPlayerUI[InPlayer]):
+            # --- السطر الإضافي لضمان التنظيف ---
+            if (OldUI := SummaryUIElements[InPlayer]):
+                PlayerUI.RemoveWidget(OldUI)
+            
+            SavePlayerData(InPlayer)
+            # الحسابات
+            MostSoldItem := GetMostSold()
+            NetProfit := PlayerMoney - (DebtElectricity + DebtRent)
+
+            # تجهيز الزر
+            BtnNextDay := button_loud{DefaultText := TextToMsg(" الخروج ")}
+            BtnNextDay.OnClick().Subscribe(HandleNextDay)
+
+            # بناء الواجهة
+            SummaryCanvas := canvas:
+                Slots := array:
+                    # 1. الخلفية المخصصة
+                    canvas_slot:
+                        ZOrder := 0
+                        Anchors := anchors{Minimum := vector2{X := 0.5, Y := 0.5}, Maximum := vector2{X := 0.5, Y := 0.5}}
+                        Alignment := vector2{X := 0.5, Y := 0.5}
+                        Widget := texture_block:
+                            DefaultImage := SummeryUI 
+                            DefaultDesiredSize := vector2{X := 850.0, Y := 850.0}
+
+                    # 2. محتوى النصوص
+                    canvas_slot:
+                        ZOrder := 1
+                        Anchors := anchors{Minimum := vector2{X := 0.5, Y := 0.5}, Maximum := vector2{X := 0.5, Y := 0.5}}
+                        Alignment := vector2{X := 0.5, Y := 0.5}
+                        Widget := stack_box:
+                            Orientation := orientation.Vertical
+                            Slots := array:
+                                stack_box_slot:
+                                    Padding := margin{Top := 5.0, Bottom := 30.0}
+                                    Widget := text_block{DefaultText := TextToMsg("🏁 ملخص اليوم رقم {DayCount}"), DefaultTextColor := NamedColors.Gold}
+                                stack_box_slot:
+                                    Padding := margin{Top := 5.0, Bottom := 5.0}
+                                    Widget := text_block{DefaultText := TextToMsg("--------------------------"), DefaultTextColor := NamedColors.Gray}
+
+                                stack_box_slot:
+                                    Padding := margin{Top := 10.0, Bottom := 10.0}
+                                    Widget := text_block{DefaultText := TextToMsg("💰 الأرباح الإجمالية: {PlayerMoney}$" ),DefaultTextColor := NamedColors.AliceBlue }
+                                stack_box_slot:
+                                    Padding := margin{Top := 10.0, Bottom := 10.0}
+                                    Widget := text_block{DefaultText := TextToMsg("🔥 الأكثر مبيعاً: {MostSoldItem}"), DefaultTextColor := NamedColors.Orange}
+                                stack_box_slot:
+                                    
+                                    Padding := margin{Top := 10.0, Bottom := 10.0}
+                                    Widget := text_block{DefaultText := TextToMsg(" كهرباء: {DebtElectricity}$ |  إيجار: {DebtRent}$"), DefaultTextColor := NamedColors.Red}
+                                stack_box_slot:
+                                    Padding := margin{Top := 10.0, Bottom := 10.0}
+                                    Widget := text_block{DefaultText := TextToMsg("📉 صافي الربح: {NetProfit}$"), DefaultTextColor := NamedColors.Green}
+                                
+                                
+                                
+                                # سطر إضافي للتحذير من نقص المخزن (اختياري)
+                                stack_box_slot:
+                                    Padding := margin{Top := 10.0, Bottom := 20.0}
+                                    Widget := text_block{DefaultText := TextToMsg(" تنبيه: تأكد من تعبئة المخزن قبل الغد!"), DefaultTextColor := NamedColors.Yellow}
+                                    
+                                stack_box_slot:
+                                    Padding := margin{Top := 10.0, Bottom := 30.0}
+                                    HorizontalAlignment := horizontal_alignment.Center
+                                    Widget := BtnNextDay
+
+            # --- الخطوة الأهم: الحفظ والإضافة (خارج الـ Slots) ---
+            if (set SummaryUIElements[InPlayer] = SummaryCanvas):
+                # إضافة الواجهة مع السماح بكل المدخلات
+                PlayerUI.AddWidget(SummaryCanvas, player_ui_slot{InputMode := ui_input_mode.All})
+                
+                # --- السطر السحري لإظهار الماوس ---
+                # هذا السطر يجبر اللعبة على إظهار المؤشر ومنح التحكم للواجهة
+                if (PlayerController := InPlayer.GetFortCharacter[]):
+                    # في بعض النسخ تحتاج لاستدعاء إظهار الماوس من خلال جهاز خارجي أو إعدادات اللعبة
+                    # لكن برمجياً التأكد من ui_input_mode.All هو الأساس
+                    Print("Mouse should be active now")
+
+                
+
+    HandleComputerInteraction(InAgent : agent):void=
+        if (InPlayer := player[InAgent]):
+            set ShopStatusMessage = "" # 👈 ضيف هذا السطر هون
+            ShowUpgradeMenu(InPlayer)
+      
+
+    # --- دالة بدء عملية الطبخ (عند ضغط زر الفرن) ---
+    OnStartCooking(InAgent : agent) : void =
+        if (InPlayer := player[InAgent]):
+            var MaxElectricDebt : int = 40 + (PlayerLevel * 60)
+            
+            Print("الزر انضغط!") # عشان تتأكد إن الربط في UEFN صح
+            
+            
+            # 1. فحص ديون الكهرباء
+            if (DebtElectricity >= MaxElectricDebt):
+                HUDMessage.SetText(TextToMsg("⚠️ الكهرباء مقطوعة! ادفع فواتيرك من الكمبيوتر أولاً"))
+                HUDMessage.Show(InPlayer)
+                return 
+
+            var WasUsedForEvent : logic = false
+
+            # 2. فحص إذا كان الطبخ لحدث نشط
+            if (IsEventActive?):
+                for (Key -> Req : ActiveEventReqs):
+                    if (Req.IsCookedCount < Req.CurrentBatchCount):
+                        # نتحقق من المنيو: هل هذا الصنف يحتاج طبخ؟
+                        var FoundNeedsCooking : logic = false
+                        for (Food : FoodMenu):
+                            if (Food.FoodName = Req.FoodName and Food.NeedsCooking = true):
+                                set FoundNeedsCooking = true
+
+                        if (FoundNeedsCooking?):
+                            # 🔥 صنف ساخن (بيتزا): شغل الفرن
+                            spawn{ StartCookingTimer(InPlayer) }
+                        else:
+                            # 🥗 صنف بارد (سلطة): اعتبره "مطبوخ" فوراً وانقله للتغليف
+                            NewReq := event_requirement{
+                                FoodName := Req.FoodName,
+                                RequiredAmount := Req.RequiredAmount,
+                                CurrentBatchCount := Req.RequiredAmount,
+                                IsCookedCount := Req.RequiredAmount, # ننهي مرحلة الفرن فوراً
+                                IsFullyPacked := Req.IsFullyPacked
+                            }
+                            if (set ActiveEventReqs[Key] = NewReq):
+                                HUDMessage.SetText(TextToMsg("🥗 {Req.FoodName} جاهزة للتغليف مباشرة!"))
+                                HUDMessage.Show(InPlayer)
+                                UpdateButtonsState()
+                                UpdateUI(InPlayer)
+                        return
+
+            # 3. إذا لم يكن للحدث، نتحقق من الطلب العادي
+            if (WasUsedForEvent = false):
+                if (Order := CurrentOrder?):
+                    if (Order.CurrentStatus = order_status.Packaging):
+                        HUDMessage.SetText(TextToMsg("📦 الأكل نضج بالفعل، توجه للتغليف!"))
+                        HUDMessage.Show(InPlayer)
+                    else if (Order.CurrentStatus = order_status.Cooking):
+                        spawn{ StartCookingTimer(InPlayer) }
+                        Print("بدأ الطبخ للطلب العادي")
+                    else:
+                        HUDMessage.SetText(TextToMsg("⚠️ جهّز المكونات أولاً من المطبخ!"))
+                        HUDMessage.Show(InPlayer)
+                else:
+                    Print("لا يوجد طلب عادي ولا حدث نشط!")
+                    HUDMessage.SetText(TextToMsg("⚠️ لا يوجد طلب للبدء بالطبخ!"))
+                    HUDMessage.Show(InPlayer)
+
+
+    # --- دالة المؤقت والتعامل مع النتائج (استلام أو احتراق) ---
+    # --- دالة المؤقت المعدلة للطبخ الجماعي ---
+   # --- دالة المؤقت والتعامل مع النتائج (استلام أو احتراق) ---
+    # تم التعديل لربط سرعة الطبخ بمستوى CookLevel الخاص باللاعب
+    StartCookingTimer(InPlayer : player)<suspends> : void =
+        if (Agent := agent[InPlayer]):
+            # --- 1. فحص الأصناف الباردة (صمام الأمان) ---
+            var NeedsCookingAtAll : logic = false
+            if (IsEventActive?):
+                for (Req : ActiveEventReqs):
+                    for (MenuItem : FoodMenu):
+                        if (MenuItem.FoodName = Req.FoodName and MenuItem.NeedsCooking = true):
+                            set NeedsCookingAtAll = true
+            else if (Order := CurrentOrder?):
+                for (FName : Order.FoodName):
+                    for (MenuItem : FoodMenu):
+                        if (MenuItem.FoodName = FName and MenuItem.NeedsCooking = true):
+                            set NeedsCookingAtAll = true
+
+            if (NeedsCookingAtAll = false):
+                HUDMessage.SetText(TextToMsg("❄️ هذه الأصناف باردة، توجه للتغليف مباشرة 📦"))
+                HUDMessage.Show(InPlayer)
+                UpdateOrderToPackaging(InPlayer)
+                return 
+
+            # --- 2. التجهيز والحساب ---
+            var TotalAmountToRemove : int = 0
+            var DisplayFoodName : string = ""
+            var SelectedFoodForTime : ?food_item = false 
+            var ItemsCurrentlyInOven : []string = array{}
+            
+            if (IsEventActive?):
+                for (Key -> Req : ActiveEventReqs):
+                    for (MenuItem : FoodMenu):
+                        if (MenuItem.FoodName = Req.FoodName and MenuItem.NeedsCooking = true):
+                            if (Req.IsCookedCount < Req.RequiredAmount):
+                                if (MenuItem.ItemChecker.HasAllItems[Agent]):
+                                    set TotalAmountToRemove += Req.RequiredAmount
+                                    if (not SelectedFoodForTime?):
+                                         set SelectedFoodForTime = option{MenuItem}
+                                    set DisplayFoodName = if (DisplayFoodName = "") then Req.FoodName else DisplayFoodName + " & " + Req.FoodName
+            
+            else if (Order := CurrentOrder?):
+                for (OrderedFoodName : Order.FoodName):
+                    for (MenuItem : FoodMenu):
+                        if (MenuItem.FoodName = OrderedFoodName and MenuItem.NeedsCooking = true):
+                            if (MenuItem.ItemChecker.HasAllItems[Agent]):
+                                set TotalAmountToRemove += 1
+                                set DisplayFoodName = MenuItem.FoodName
+                                set SelectedFoodForTime = option{MenuItem}
+
+            if (TotalAmountToRemove <= 0):
+                HUDMessage.SetText(TextToMsg("⚠️ لا تملك المكونات الخام المطلوبة!"))
+                HUDMessage.Show(InPlayer)
+                return
+
+            # --- 3. بدء عملية الطبخ (سحب المكونات مرة واحدة فقط) ---
+            CookingButton.Disable()
+            OvenVFX.Enable()
+            BoilingSFX.Play()
+            HUDMessage.SetText(TextToMsg("🔥 جاري طبخ: {DisplayFoodName}..."))
+            HUDMessage.Show(InPlayer)
+
+            if (Order := CurrentOrder?):
+                for (OrderedFoodName : Order.FoodName):
+                    for (MenuItem : FoodMenu):
+                        if (MenuItem.FoodName = OrderedFoodName and MenuItem.NeedsCooking = true):
+                            if (MenuItem.ItemChecker.HasAllItems[Agent]):
+                                MenuItem.ItemChecker.Activate(Agent) 
+                                set ItemsCurrentlyInOven += array{MenuItem.FoodName}
+
+            else if (IsEventActive?):
+                for (Req : ActiveEventReqs):
+                    for (MenuItem : FoodMenu):
+                        if (MenuItem.FoodName = Req.FoodName and MenuItem.NeedsCooking = true):
+                            if (MenuItem.ItemChecker.HasAllItems[Agent]):
+                                for (i := 1..Req.RequiredAmount):
+                                    MenuItem.ItemChecker.Activate(Agent)
+                                set ItemsCurrentlyInOven += array{MenuItem.FoodName}
+
+            # --- 4. وقت الطبخ (مرة واحدة فقط) ---
+            var ActualSleepTime : float = 10.0
+            if (FoodData := SelectedFoodForTime?, Stats := SavedPlayerData[InPlayer]):
+                set ActualSleepTime = FoodData.CookingTime - (FoodData.CookingTime * (Stats.SavedCookLevel * 0.1))
+
+            Sleep(ActualSleepTime)
+            
+            # --- 5. استلام النتائج ---
+            BoilingSFX.Stop()
+            CookingButton.Enable() 
+            HUDMessage.SetText(TextToMsg("🔔 نضجت المكونات! اضغط لاستلامها"))
+            HUDMessage.Show(InPlayer)
+
+            loop:
+                InAgent := CookingButton.InteractedWithEvent.Await() 
+                if (InAgent = Agent):
+                    OvenVFX.Disable()
+                    if (IsEventActive?):
+                        var EventUpdated : logic = false
+                        for (Index -> Req : ActiveEventReqs):
+                            var WasThisItemInOven : logic = false
+                            for (CookedItemName : ItemsCurrentlyInOven):
+                                if (CookedItemName = Req.FoodName):
+                                    set WasThisItemInOven = true
+
+                            if (WasThisItemInOven?):
+                                NewReq := event_requirement{
+                                    FoodName := Req.FoodName,
+                                    RequiredAmount := Req.RequiredAmount,
+                                    CurrentBatchCount := Req.RequiredAmount,
+                                    IsCookedCount := Req.RequiredAmount, 
+                                    IsFullyPacked := Req.IsFullyPacked
+                                }
+                                if (set ActiveEventReqs[Index] = NewReq):
+                                    set EventUpdated = true
+                                    for (MenuItem : FoodMenu):
+                                        if (MenuItem.FoodName = Req.FoodName):
+                                            MenuItem.CookedGranter.GrantItem(InAgent)
+                        
+                        if (EventUpdated?):
+                            UpdateUI(InPlayer)
+                            CheckEventStageTransition(InPlayer)
+                    else if (Order := CurrentOrder?):
+                        if (FoodData := SelectedFoodForTime?):
+                            FoodData.CookedGranter.GrantItem(InAgent)
+                        NewOrder := active_order{
+                            TargetApartmentID := Order.TargetApartmentID,
+                            FoodName := Order.FoodName,
+                            CurrentStatus := order_status.Packaging,
+                            TimeRemaining := Order.TimeRemaining,
+                            IsVIP := Order.IsVIP,
+                            FoodIndex := Order.FoodIndex
+                        }
+                        set CurrentOrder = option{NewOrder}
+                    UpdateUI(InPlayer)
+                    UpdateButtonsState()
+                    break
+
+
+    UpdateOrderToPackaging(InPlayer : player) : void =
+        if (Order := CurrentOrder?):
+            # تعديل طريقة تعريف الـ struct باستخدام علامة الـ = 
+            NewOrder := active_order:
+                TargetApartmentID := Order.TargetApartmentID
+                FoodName := Order.FoodName
+                FoodIndex := Order.FoodIndex
+                CurrentStatus := order_status.Packaging
+                TimeRemaining := Order.TimeRemaining
+                IsVIP := Order.IsVIP
+            
+            set CurrentOrder = option{NewOrder}
+            set CurrentStageName = "تغليف الطلب 📦"
+            UpdateUI(InPlayer)
+
+
+            
+    # دالة إنهاء الأكل البارد للحدث (توضع داخل الكلاس الخاص بك)
+    FinishColdFoodForEvent(InPlayer : player, Key : int, Req : event_requirement) : void =
+        if (Agent := agent[InPlayer]):
+            # نحدث الطلب ليصبح "مطبوخ" (جاهز) بالكامل فوراً
+            NewReq := event_requirement{
+                FoodName := Req.FoodName,
+                RequiredAmount := Req.RequiredAmount,
+                CurrentBatchCount := Req.RequiredAmount, # نعتبره اكتمل تحضيره
+                IsCookedCount := Req.RequiredAmount,      # نعتبره اكتمل طبخه (لأنه بارد)
+                IsFullyPacked := Req.IsFullyPacked
+            }
+
+            if (set ActiveEventReqs[Key] = NewReq):
+                # 1. نعطيه المنتج النهائي (البارد) فوراً
+                for (MenuItem : FoodMenu):
+                    if (MenuItem.FoodName = Req.FoodName):
+                        MenuItem.CookedGranter.GrantItem(Agent)
+                
+                # 2. تنبيه اللاعب
+                HUDMessage.SetText(TextToMsg("✅ {Req.FoodName} جاهز (صنف بارد)، توجه للتغليف!"))
+                HUDMessage.Show(Agent)
+
+                # 3. تحديث الأزرار والـ UI عشان يفتح زر التغليف فوراً
+                UpdateUI(InPlayer)
+                UpdateButtonsState()
+
+
+                        
+                    
+    FinishCooking(InAgent : agent) : void =
+        if (InPlayer := player[InAgent], Order := CurrentOrder?):
+            
+            OvenVFX.Disable()
+            BoilingSFX.Stop()
+            ItemRemover.Remove(InAgent)
+            
+            # إعطاء الأكلة المطبوخة
+            for (Food : FoodMenu):
+                if (Food.FoodName = Order.FoodName):
+                    Food.CookedGranter.GrantItem(InAgent)
+
+            # 🛑 التحديث الصحيح للحالة هنا:
+            NewOrder := active_order:
+                TargetApartmentID := Order.TargetApartmentID
+                FoodName := Order.FoodName
+                NeedsCooking := Order.NeedsCooking
+                CookedGranter := Order.CookedGranter
+                IsVIP := Order.IsVIP
+                CurrentStatus := order_status.Packaging # تغيير الحالة فعلياً
+                TimeRemaining := Order.TimeRemaining
+            
+            set CurrentOrder = option{NewOrder} # حفظ النسخة الجديدة
+            
+            set CurrentStageName = "مرحلة التغليف "
+            set StepTimeRemaining = 30.0
+
+            UpdateButtonsState() 
+            UpdateUI(InPlayer)
+            
+            HUDMessage.SetText(TextToMsg("✅ نضج الطعام! اذهب للتغليف الآن"))
+            HUDMessage.Show(InAgent)
+            UpdateUI(InPlayer)
+
+
+   
+
+    
+    DelayedFirstOrder(InPlayer : player)<suspends>:void=
+        Sleep(20.0) # قللنا الوقت لـ 5 ثواني للتجربة
+        Print("Checking if order can be created...")
+        
+        # إذا كان المحل مفتوح وما في طلب شغال، اجبره يبدأ
+        if (not CurrentOrder?):
+            Print("No active order found, creating one now!")
+            CreateNewOrder(InPlayer)
+        else:
+            Print("There is already an active order.")
+    # لما يفتح المحل
+    OnShopOpened(InAgent : agent):void=
+
+        if (InPlayer := player[InAgent]):
+            var MaxAllowedDebt : int = 200 + (PlayerLevel * 100)
+
+            # 1. فحص الديون
+            if (DebtRent >= MaxAllowedDebt):
+                HUDMessage.SetText(TextToMsg("❌ المحل محجوز! دينك هو {DebtRent}$ والحد المسموح {MaxAllowedDebt}$"))
+                HUDMessage.Show(InPlayer)
+                ShopSwitch.TurnOff(InAgent)
+                return
+
+            # 2. فحص المخزون
+            var TotalStock : int = 0
+            for (FoodItem : FoodMenu) do set TotalStock += FoodItem.Stock
+            
+            if (TotalStock <= 0):
+                HUDMessage.SetText(TextToMsg("❌ لا يوجد بضاعة! اشترِ منتجات أولاً"))
+                HUDMessage.Show(InPlayer)
+                ShopSwitch.TurnOff(InAgent)
+                return
+
+            # 3. تصفير الإحصائيات وتشغيل حالة المحل
+            ResetDayStats()
+            set IsShopOpen = true
+
+            # 4. فحص الحدث أولاً
+            CheckForSpecialEvent(InPlayer)
+
+            # 5. الشرط الذهبي: إذا لم يتفعل حدث، انتظر ثم اطلب
+            if (not IsEventActive?):
+                # بدلاً من CreateNewOrder(InPlayer) مباشرة
+                # سنقوم بتشغيل دالة الانتظار في الخلفية
+                spawn{ WaitAndCreateOrder(InPlayer) } 
+                Print("🏠 انتظر حتى يأتي اول طلب لك اليوم .")
+            else:
+                Print("📢 حدث خاص: تم إيقاف الطلبات العادية لليوم.")
+            
+            # --- التعديل هنا: استدعاء الدالة بالأقواس لتعمل فعلياً ---
+            UpdateButtonsState() 
+
+            # 6. تشغيل الساعة والواجهة
+            UpdateUI(InPlayer)
+            UpdateClockUI(InAgent)
+            spawn{ StartClockLoop(InAgent) }
+            
+            HUDMessage.SetText(TextToMsg("🏪 تم فتح المحل! بالتوفيق في عملك"))
+            HUDMessage.Show(InPlayer)
+            # سطر الحفظ هنا لتثبيت بداية اليوم والحدث المختار
+            SavePlayerData(InPlayer)
+    # لما يغلق المحل
+    OnShopClosed(InAgent : agent):void=
+        if (InPlayer := player[InAgent]):
+            if (IsShopOpen = true):
+                set IsShopOpen = false 
+                Print("🔒 تم إغلاق المحل - إيقاف الوقت")
+                
+                # 1. نفذ منطق نهاية اليوم (حساب الأرباح/الديون)
+                EndTheDay(InAgent) 
+                
+                # 2. احفظ كل التغييرات فوراً
+                SavePlayerData(InPlayer) 
+                
+                # 3. تحديث الواجهة للأمان
+                UpdateUI(InPlayer)
+
+
+        # زر "جاهز لطلب جديد"
+    OnNextOrderPressed(InAgent : agent):void=
+            if (InPlayer := player[InAgent], IsShopOpen = true):
+                NextOrderButton.Disable()
+                set IsWaitingForReadyPress = false
+                HUDMessage.SetText(TextToMsg("🔄 جاري البحث عن طلب جديد..."))
+                HUDMessage.Show(InAgent)
+                spawn{ WaitAndCreateOrder(InPlayer) }
+        
+    WaitAndCreateOrder(InPlayer : player)<suspends>:void=
+        # 1. جلب السمعة من ملف الحفظ (السمعة هي المفتاح هنا)
+        CurrentRep := if (Stats := SavedPlayerData[InPlayer]) then Stats.SavedReputation else 0.0
+
+        # 2. تحديد وقت الانتظار بناءً على السمعة
+        var MinWait : float = 1.0
+        var MaxWait : float = 5.0
+
+        if (CurrentRep < 20.0):
+            set MinWait = 10.0
+            set MaxWait = 20.0
+        else if (CurrentRep < 50.0):
+            set MinWait = 5.0
+            set MaxWait = 10.0
+        else if (CurrentRep < 80.0):
+            set MinWait = 2.0
+            set MaxWait = 5.0
+        else: 
+            set MinWait = 0.5
+            set MaxWait = 2.0
+
+        # 3. توليد الوقت العشوائي والانتظار
+        WaitTime := GetRandomFloat(MinWait, MaxWait)
+        
+        HUDMessage.SetText(TextToMsg("📡 بانتظار طلب الزبون القادم..."))
+        HUDMessage.Show(InPlayer)
+
+        Sleep(WaitTime) # الانتظار الفعلي
+
+        # 4. إنشاء الطلب وتشغيل الصوت
+        if (IsShopOpen = true, not CurrentOrder?):
+            CreateNewOrder(InPlayer)
+            # تأكد من إضافة (InPlayer) هنا لضمان خروج الصوت عنده
+            OrderSound.Play(InPlayer) 
+            Print("✅ تم إنشاء الطلب بعد انتظار {WaitTime} ثانية")
+            
+                
+    # دالة مراقبة أزرار الشقق
+    AwaitAptPress(Apt : apartment_zone)<suspends>:void=
+        loop:
+            Agent := Apt.CondButton.ActivatedEvent.Await()
+            Print("تم تفعيل زر المنزل رقم: {Apt.ApartmentID}")
+            FinishOrder(Agent, Apt.ApartmentID)
+
+    
+    
+
+
+    OnPlayerAdded(InPlayer : player):void =
+        SubscribeToPurchases(InPlayer)
+        if (Stats := SavedPlayerData[InPlayer]):
+            if (Stats.HasSeenWelcome = false):
+                ShowWelcomeUI(InPlayer)
+                # أنشئ نسخة جديدة مع كل القيم كما كانت، فقط HasSeenWelcome = true
+                NewStats := player_stats{
+                    Money := Stats.Money,
+                    Level := Stats.Level,
+                    CurrentDay := Stats.CurrentDay,
+                    TotalOrders := Stats.TotalOrders,
+                    SavedReputation := Stats.SavedReputation,
+                    SavedTotalDeliveries := Stats.SavedTotalDeliveries,
+                    SavedBonusTime := Stats.SavedBonusTime,
+                    SavedDebtElectricity := Stats.SavedDebtElectricity,
+                    SavedDebtRent := Stats.SavedDebtRent,
+                    SavedPrepLevel := Stats.SavedPrepLevel,
+                    SavedCookLevel := Stats.SavedCookLevel,
+                    SavedPackLevel := Stats.SavedPackLevel,
+                    HasRadarUpgrade := Stats.HasRadarUpgrade,
+                    IsVIPPurchased := Stats.IsVIPPurchased,
+                    HasSpeedUpgrade := Stats.HasSpeedUpgrade,
+                    HasScooterUnlocked := Stats.HasScooterUnlocked,
+                    HasVehicleUnlocked := Stats.HasVehicleUnlocked,
+                    HasHeatBag := Stats.HasHeatBag,
+                    InventoryStocks := Stats.InventoryStocks,
+                    SavedWarehouseLevel := Stats.SavedWarehouseLevel,
+                    SavedGlobalMaxCapacity := Stats.SavedGlobalMaxCapacity,
+                    SavedOwnedCars := Stats.SavedOwnedCars,
+                    PlayerXP := Stats.PlayerXP,
+                    SpecialTokens := Stats.SpecialTokens,
+                    TotalTipsEarned := Stats.TotalTipsEarned,
+                    
+                    MaxDailyProfit := Stats.MaxDailyProfit,
+                    UnlockedPerks := Stats.UnlockedPerks,
+                    SkillPoints := Stats.SkillPoints,
+                    TotalFailedOrders := Stats.TotalFailedOrders,
+                    DataVersion := Stats.DataVersion,
+                    FastestDeliveryTime := Stats.FastestDeliveryTime,
+                    MostExpensiveOrder := Stats.MostExpensiveOrder,
+                    LastLoginTimestamp := Stats.LastLoginTimestamp,
+                    SavedLevelThreshold := Stats.SavedLevelThreshold, # حفظ رقم الترقية
+                    HasSeenWelcome := true
+                }
+                if (set SavedPlayerData[InPlayer] = NewStats) {}
+            else:
+                Print("اللاعب شاف الترحيب من قبل.")
+        else:
+            ShowWelcomeUI(InPlayer)
+            NewStats := player_stats{HasSeenWelcome := true}
+            if (set SavedPlayerData[InPlayer] = NewStats) {}
+
+        UpdateUI(InPlayer)
+
+
+    OnPlayerLeft(InPlayer : player):void=
+        Print("🏃 لاعب غادر، جاري حفظ بياناته الأخيرة...")
+        SavePlayerData(InPlayer)
+
+
+
+    OnStartJobPressed(InAgent : agent):void=
+        if (InPlayer := player[InAgent]):
+            # 1. تصفير إحصائيات اليوم (عشان يبدأ يوم جديد بصفحة بيضاء)
+            set DayEarnings = 0
+            set DayOrdersCount = 0
+            set DailySalesTracker = map{} # تصفير الماب للأكثر مبيعاً
+            set CurrentHour = 8            # ضبط الساعة على 8 صباحاً
+            set CurrentMinute = 0
+            
+            # 2. تفعيل حالة المحل
+            set IsShopOpen = true
+            
+            # 3. تشغيل الطلب الأول وتحديث الواجهة
+            CreateNewOrder(InPlayer)
+            UpdateUI(InPlayer)
+            UpdateClockUI(InAgent) # إظهار الساعة فوراً
+
+            # 4. 🔥 أهم خطوة: تشغيل عداد الوقت (الساعة) في الخلفية
+            spawn{ StartClockLoop(InAgent) }
+            SavePlayerData(InPlayer)
+            
+            Print("🚀 انطلق! وردية العمل بدأت من الساعة 8 صباحاً")
+
+
+    # دالة شراء سرعة الركض
+    OnBuySpeed(InAgent : agent):void=
+        if (InPlayer := player[InAgent]):
+            Cost := 500
+            if (PlayerMoney >= Cost):
+                set PlayerMoney -= Cost
+                SpeedModulator.Activate(InAgent) # زيادة سرعة اللاعب
+                UpdateUI(InPlayer)
+                SavePlayerData(InPlayer) # حفظ فوراً بعد الخصم والتفعيل
+                HUDMessage.SetText(TextToMsg("⚡ تمت زيادة سرعة الركض!"))
+                HUDMessage.Show(InAgent)
+                
+            else:
+                HUDMessage.SetText(TextToMsg("❌ لا تملك مالاً كافياً (تحتاج 500$)"))
+                HUDMessage.Show(InAgent)
+
+            
+
+   
+           
+
+    
+    # --- تحديث واجهة المستخدم ---
+    # --- دالة تحديث الواجهة الشاملة ---
+    UpdateUI(InPlayer : player):void=
+        if (PlayerUI := GetPlayerUI[InPlayer]):
+            
+            if (OldUI := MaybePlayerUI?):
+                PlayerUI.RemoveWidget(OldUI)
+                set MaybePlayerUI = false
+
+            var OrderInfoText : string = "لا يوجد طلب حالياً"
+            var TimeText : string = ""
+            var OrderColor : color = NamedColors.White
+            
+            # --- 1. حساب نسبة شريط التقدم لليفل ---
+            var ProgressPercent : float = 0.0
+            CurrentDoneFloat := CompletedOrders * 1.0
+            TotalNeededFloat := NextLevelThreshold * 1.0
+            if (TotalNeededFloat > 0.0):
+                set ProgressPercent = CurrentDoneFloat / TotalNeededFloat
+
+            # --- 2. منطق الطلب العادي المطور ---
+            if (Order := CurrentOrder?):
+                District := GetDistrictName(Order.TargetApartmentID)
+                AptNum := Order.TargetApartmentID
+                
+                var StageTitle : string = ""
+                if (Order.CurrentStatus = order_status.Preparing):
+                    set StageTitle = "🔪 مرحلة التحضير"
+                else if (Order.CurrentStatus = order_status.Cooking):
+                    set StageTitle = "🔥 مرحلة الطبخ"
+                else if (Order.CurrentStatus = order_status.Packaging):
+                    set StageTitle = "📦 مرحلة التغليف"
+                else if (Order.CurrentStatus = order_status.Delivering):
+                    set StageTitle = "🛵 مرحلة التوصيل"
+
+                var NamesCombined : string = ""
+                for (Index -> Name : Order.FoodName):
+                    if (Index = 0):
+                        set NamesCombined = Name
+                    else:
+                        set NamesCombined = "{NamesCombined} + {Name}"
+                
+                set OrderInfoText = "{StageTitle}: {NamesCombined}\n📍 المكان: {District} (منزل {AptNum})"
+                set OrderColor = if (Order.IsVIP?) then NamedColors.Gold else NamedColors.White
+
+                if (STime := Int[StepTimeRemaining]):
+                    set TimeText = " الوقت المتبقي: {STime}s"
+
+            # --- 3. قسم الحدث الكبير ---
+            var EventWidgets : []stack_box_slot = array{}
+            if (IsEventActive?):
+                HeaderWidget := stack_box_slot:
+                    Padding := margin{Top := 20.0, Bottom := 10.0}
+                    Widget := text_block:
+                        DefaultText := TextToMsg("🔥 طلب كبير لحدث {CurrentEventLocation} 🔥")
+                        DefaultTextColor := NamedColors.Orange
+                
+                set EventWidgets += array{HeaderWidget}
+
+                for (Key -> Req : ActiveEventReqs):
+                    var IsColdItem : logic = false
+                        for (MenuItem : FoodMenu):
+                            if (MenuItem.FoodName = Req.FoodName and MenuItem.NeedsCooking = false):
+                                set IsColdItem = true
+                    var TaskMessage : string = ""
+                    var EventStatusColor : color = NamedColors.White
+
+                    if (Req.CurrentBatchCount < Req.RequiredAmount):
+                        set TaskMessage = "📦 اجمع {Req.FoodName}: ({Req.CurrentBatchCount}/{Req.RequiredAmount})"
+                        set EventStatusColor = NamedColors.White
+
+                    # 🔥 التعديل هنا: إذا كان الصنف يحتاج طبخ ولسا ما انطبخ
+                    else if (IsColdItem = false and Req.IsCookedCount < Req.RequiredAmount):
+                        set TaskMessage = "🔥 اطبخ {Req.FoodName}: ({Req.IsCookedCount}/{Req.RequiredAmount})"
+                        set EventStatusColor = NamedColors.Red
+
+                    # ✅ التعديل هنا: إذا كان الصنف بارداً (IsColdItem = true) 
+                    # أو إذا كان ساخناً وانتهى طبخه (IsCookedCount اكتمل)
+                    else if (Req.IsFullyPacked = false):
+                        if (IsColdItem?):
+                            set TaskMessage = "✅ {Req.FoodName} جاهزة! (توجه للتغليف 📦)"
+                        else:
+                            set TaskMessage = "✅ نضجت {Req.FoodName}! (توجه للتغليف 📦)"
+                        set EventStatusColor = NamedColors.Cyan
+
+                    else:
+                        set TaskMessage = "📦 {Req.FoodName}: جاهزة في الكرتونة!"
+                        set EventStatusColor = NamedColors.Green
+
+                    RequirementWidget := stack_box_slot:
+                        Padding := margin{Left := 10.0, Top := 5.0}
+                        Widget := text_block:
+                            DefaultText := TextToMsg(TaskMessage)
+                            DefaultTextColor := EventStatusColor 
+                    
+                    set EventWidgets += array{RequirementWidget}
+
+           
+            # --- 4. إنشاء الـ Canvas الجديد ---
+            NewCanvas := canvas:
+                Slots := array:
+                    canvas_slot:
+                        # التمركز الاحترافي (يسار الوسط)
+                        Anchors := anchors{Minimum := vector2{X := 0.0, Y := 0.5}, Maximum := vector2{X := 0.0, Y := 0.5}}
+                        Offsets := margin{Left := 50.0, Top := 150.0}
+                        Alignment := vector2{X := 0.0, Y := 0.5} 
+
+                        Widget := stack_box:
+                            Orientation := orientation.Vertical
+                            Slots := array:
+                                # --- [ الجزء العلوي: بيانات اللاعب والرانك ] ---
+                                stack_box_slot:
+                                    Padding := margin{Bottom := 10.0, Left := 5.0}
+                                    Widget := stack_box:
+                                        Orientation := orientation.Horizontal
+                                        Slots := array:
+                                            stack_box_slot:
+                                                Padding := margin{Right := 25.0}
+                                                # التعديل هنا: نربط الـ text_block بالمتغير الذي عرفناه
+                                                Widget := set MoneyTextBlock = text_block: 
+                                                    DefaultText := TextToMsg("💰 {PlayerMoney}$")
+                                                    DefaultTextColor := NamedColors.Gold
+                                                    DefaultShadowOffset := option{vector2{X := 2.0, Y := 2.0}}
+                                            stack_box_slot:
+                                                Widget := text_block:
+                                                    DefaultText := TextToMsg("⭐ LEVEL {PlayerLevel}")
+                                                    DefaultTextColor := NamedColors.Cyan
+                                                    DefaultShadowOffset := option{vector2{X := 2.0, Y := 2.0}}
+
+                                # --- [ بطاقة المهمة الشفافة (المحتوية للنص الطويل) ] ---
+                                # --- [ بطاقة المهمة الديناميكية ] ---
+                                stack_box_slot:
+                                    Widget := overlay:
+                                        Slots := array:
+                                            # 1. الخلفية - الآن ستتمدد تلقائياً
+                                            overlay_slot:
+                                                Widget := color_block:
+                                                    DefaultColor := MakeColorFromHex("00000066") 
+                                                    # حذفنا DefaultDesiredSize لنجعلها مرنة
+                                                HorizontalAlignment := horizontal_alignment.Fill # تمدد أفقي كامل
+                                                VerticalAlignment := vertical_alignment.Fill   # تمدد عمودي كامل
+
+                                            # 2. الإطار الجانبي المضيء
+                                            overlay_slot:
+                                                HorizontalAlignment := horizontal_alignment.Left
+                                                Widget := color_block:
+                                                    DefaultColor := NamedColors.Crimson
+                                                    # نجعل العرض ثابت (3.0) لكن الطول Fill ليتبع حجم النص
+                                                    DefaultDesiredSize := vector2{X := 3.0, Y := 0.0} 
+                                                VerticalAlignment := vertical_alignment.Fill
+
+                                            # 3. محتوى المهمة (هو الذي سيحدد حجم الخلفية)
+                                            overlay_slot:
+                                                # Padding ضروري جداً هنا لكي لا يلمس النص أطراف الخلفية
+                                                Padding := margin{Left := 20.0, Right := 20.0, Top := 15.0, Bottom := 15.0}
+                                                VerticalAlignment := vertical_alignment.Center
+                                                Widget := stack_box:
+                                                    Orientation := orientation.Vertical
+                                                    Slots := array:
+                                                        stack_box_slot:
+                                                            Widget := text_block:
+                                                                DefaultText := TextToMsg("📦 {OrderInfoText}")
+                                                                DefaultTextColor := OrderColor
+                                                        stack_box_slot:
+                                                            Padding := margin{Top := 5.0}
+                                                            Widget := text_block:
+                                                                DefaultText := TextToMsg("🕒 {TimeText}")
+                                                                DefaultTextColor := NamedColors.Red
+
+                                                   
+
+                                # --- [ قسم التقدم الذكي (الجديد كلياً) ] ---
+                                stack_box_slot:
+                                    Padding := margin{Top := 5.0}
+                                    Widget := overlay:
+                                        Slots := array:
+                                            # 1. شريط التقدم الخلفي (باهت)
+                                            overlay_slot:
+                                                Widget := color_block:
+                                                    DefaultColor := MakeColorFromHex("FFFFFF22")
+                                                    DefaultDesiredSize := vector2{X := 550.0, Y := 20.0}
+                                            
+                                            # 2. شريط التقدم الفعلي (الأخضر)
+                                            overlay_slot:
+                                                HorizontalAlignment := horizontal_alignment.Left
+                                                Widget := color_block:
+                                                    DefaultColor := NamedColors.LimeGreen
+                                                    DefaultDesiredSize := vector2{X := 550.0 * ProgressPercent, Y := 20.0}
+
+                                            # 3. نص عدد الطلبات (فوق الشريط مباشرة لشكل احترافي)
+                                            overlay_slot:
+                                                HorizontalAlignment := horizontal_alignment.Center
+                                                VerticalAlignment := vertical_alignment.Center
+                                                Widget := text_block:
+                                                    # يعرض مثلاً: 3 / 5 Orders to Next Rank
+                                                    DefaultText := TextToMsg("{CompletedOrders} / {NextLevelThreshold} Orders")
+                                                    DefaultTextColor := NamedColors.Black
+                                                   
+                                                    DefaultShadowOffset := option{vector2{X := 1.0, Y := 1.0}}
+
+                                # --- [ الجزء الثالث: قاعدة التصميم (The Base Line) ] ---
+                                stack_box_slot:
+                                    Widget := color_block:
+                                        DefaultColor := MakeColorFromHex("FFFFFF22") # خط رمادي باهت جداً للجمالية
+                                        DefaultDesiredSize := vector2{X := 520.0, Y := 1.0}
+
+                                # 🌟 3. قسم الحدث الخاص (مباشر وبدون مصفوفات خارجية) 🌟
+                                # هذا الجزء سيتفقد إذا كان الحدث مفعل ويظهر الطلبات فوراً
+                                stack_box_slot:
+                                    Widget := stack_box:
+                                        Orientation := orientation.Vertical
+                                        # هذا السطر السحري سيجعل القسم يختفي تماماً إذا لم يكن هناك حدث
+                                        Slots := if (IsEventActive?) then EventWidgets else array{}
+                                        
+
+                                # 3. شريط التقدم (نحيف جداً أسفل بطاقة المهمة)
+                                stack_box_slot:
+                                    Widget := color_block:
+                                        DefaultColor := NamedColors.LimeGreen
+                                        DefaultDesiredSize := vector2{X := 500.0 * ProgressPercent, Y := 4.0}
+
+
+
+            
+            PlayerUI.AddWidget(NewCanvas)
+            set MaybePlayerUI = option{NewCanvas}
+            UpdateReputationUI(InPlayer)
+            
+            
+    UpdateReputationUI(InPlayer : player):void=
+        if (PlayerUI := GetPlayerUI[InPlayer]):
+            # فك الخيار (Optional) للواجهة القديمة
+            if (OldUI := ReputationUI?):
+                PlayerUI.RemoveWidget(OldUI)
+
+            # حل مشكلة الـ decides: نحول الرقم داخل الـ if
+            if (CurrentRepInt := Int[Reputation]):
+                NewRepCanvas := canvas:
+                    Slots := array:
+                        canvas_slot:
+                            Anchors := anchors{Minimum := vector2{X := 0.5, Y := 0.02}, Maximum := vector2{X := 0.5, Y := 0.02}}
+                            Alignment := vector2{X := 0.5, Y := 0.0}
+                            Widget := text_block:
+                                DefaultText := TextToMsg("⭐ السمعة: {CurrentRepInt}%")
+                                DefaultTextColor := NamedColors.White
+                
+                PlayerUI.AddWidget(NewRepCanvas)
+                set ReputationUI = option{NewRepCanvas}
+
+
+    # التعديل الصحيح للدالة:
+    UpdateClockUI(InAgent : agent):void=
+        # نقوم بتحويل العميل إلى لاعب أولاً، ثم نطلب واجهة المستخدم الخاصة به
+        if (InPlayer := player[InAgent], PlayerUI := GetPlayerUI[InPlayer]):
+            
+            # ... باقي الكود الخاص بتنسيق الساعة ...
+            
+            TimePrefix := if (CurrentHour < 12) then "AM" else "PM"
+            
+            # تحويل 24 ساعة لـ 12 ساعة
+            var DisplayHour : int = if (CurrentHour > 12) then CurrentHour - 12 else CurrentHour
+            if (DisplayHour = 0):
+                 set DisplayHour = 12
+
+            MinText := if (CurrentMinute < 10) then "0{CurrentMinute}" else "{CurrentMinute}"
+            ClockString := "🕒 {DisplayHour}:{MinText} {TimePrefix}"
+            
+            ClockTextBlock.SetText(TextToMsg(ClockString))
+
+            # إضافة الكانفاس إذا لم يكن موجوداً
+            if (not ClockCanvas?):
+                NewCanvas := canvas:
+                    Slots := array:
+                        canvas_slot:
+                            Anchors := anchors{Minimum := vector2{X := 0.5, Y := 0.05}, Maximum := vector2{X := 0.5, Y := 0.05}}
+                            Alignment := vector2{X := 0.5, Y := 0.0}
+                            Widget := ClockTextBlock
+                
+                PlayerUI.AddWidget(NewCanvas)
+                set ClockCanvas = option{NewCanvas}
+    
+
+    # --- منطق الطلبات ---
+    # --- دالة اختيار الطلب المصلحة ---
+    # --- دالة اختيار الطلب المصلحة ---
+
+    OnPrepPressed(InAgent : agent) : void =
+        if (InPlayer := player[InAgent]):
+            if (Order := CurrentOrder?):
+                if (Order.CurrentStatus = order_status.Preparing):
+                    Print("👨‍🍳 جاري تجهيز المكونات...")
+                    
+                    var FinalNeedsCooking : logic = false
+
+                    # 1. إعطاء المكونات وفحص هل يوجد أي صنف يحتاج طبخ؟
+                    for (FName : Order.FoodName):
+                        for (MenuItem : FoodMenu):
+                            if (MenuItem.FoodName = FName):
+                                MenuItem.ItemGranter.GrantItem(InAgent)
+                                # إذا وجدنا صنف واحد فقط يحتاج طبخ، نعتبر الطلب يحتاج فرن
+                                if (MenuItem.NeedsCooking = true):
+                                    set FinalNeedsCooking = true
+
+                    # 2. تحديد المرحلة التالية (هنا التعديل الذي تطلبه)
+                    var NextStatus : order_status = order_status.Cooking
+                    var Message : string = "✅ استلمت المكونات! اذهب للطبخ 🔥"
+                    
+                    if (FinalNeedsCooking = false):
+                        # ✅ إذا كان الطلب بارداً بالكامل، نتخطى الفرن برمجياً فوراً
+                        set NextStatus = order_status.Packaging
+                        set Message = "✅ هذه الأصناف باردة، اذهب للتغليف مباشرة 📦"
+                        set CurrentStageName = "اذهب للتغليف 📦" 
+                    else:
+                        # إذا كان هناك صنف ساخن، نوجهه للفرن كالمعتاد
+                        set NextStatus = order_status.Cooking
+                        set CurrentStageName = "اذهب للفرن 🔥"
+
+                    # 3. تحديث الطلب بالحالة الجديدة (سواء طبخ أو تغليف)
+                    NewOrder := active_order{
+                        TargetApartmentID := Order.TargetApartmentID,
+                        FoodName := Order.FoodName,
+                        NeedsCooking := FinalNeedsCooking,
+                        CookedGranter := Order.CookedGranter,
+                        CurrentStatus := NextStatus, 
+                        TimeRemaining := Order.TimeRemaining,
+                        IsVIP := Order.IsVIP,
+                        FoodIndex := Order.FoodIndex
+                    }
+                    set CurrentOrder = option{NewOrder}
+                    
+                    # 4. تحديث الشاشة فوراً للاعب
+                    HUDMessage.SetText(TextToMsg(Message))
+                    HUDMessage.Show(InPlayer)
+                    
+                    UpdateUI(InPlayer) # لتحديث النص على شاشة اللاعب فوراً
+                    UpdateButtonsState() # لتفعيل زر التغليف وتعطيل زر الفرن إذا لزم الأمر
+                            
+    CreateNewOrder(InPlayer : player):void=
+        
+        if (IsEventActive?):
+            Print("🚫 تم إلغاء إنشاء طلب عادي لوجود حدث كبير نشط.")
+            return
+
+        set CurrentStageName = "مرحلة التحضير 👨‍🍳"
+        set StepTimeRemaining = 40.0 + (PrepLevel * 10.0)
+        
+        var ShouldBeVIP : logic = false
+        if (IsVIPPurchased = true and NormalOrderCount >= NextVIPTarget):
+            set ShouldBeVIP = true
+            set NormalOrderCount = 0
+        else:
+            set NormalOrderCount += 1
+            set ShouldBeVIP = false
+                
+        var AvailableFood : []food_item = array{}
+        var AvailableApts : []apartment_zone = array{}
+
+        for (Food : FoodMenu):
+            if (PlayerLevel >= Food.RequiredLevel and Food.Stock > 0):
+                set AvailableFood = AvailableFood + array{Food}
+
+        # --- [ منطق التوسع المطور ] ---
+        BaseSourceApts : []apartment_zone = if (ShouldBeVIP = true) then VIPApartments else Apartments
+        var LeveledApts : []apartment_zone = array{}
+        var MaxAllowedIndex : int = 9 
+        if (PlayerLevel >= 4):
+            set MaxAllowedIndex = 39 
+        else if (PlayerLevel >= 3):
+            set MaxAllowedIndex = 29 
+        else if (PlayerLevel >= 2):
+            set MaxAllowedIndex = 19 
+
+        for (Idx -> Apt : BaseSourceApts):
+            if (ShouldBeVIP = true or Idx <= MaxAllowedIndex):
+                set LeveledApts = LeveledApts + array{Apt}
+
+        SourceApts : []apartment_zone = LeveledApts
+
+        for (Apt : SourceApts):
+            if (not Apt.ApartmentID = LastAptID):
+                set AvailableApts = AvailableApts + array{Apt}
+
+        if (AvailableApts.Length = 0): 
+            set AvailableApts = SourceApts
+
+        if:
+            AvailableFood.Length > 0
+            AvailableApts.Length > 0
+            RndA := GetRandomInt(0, AvailableApts.Length - 1)
+            SelectedApt : apartment_zone = AvailableApts[RndA]
+        then:
+            var SelectedFoodNames : []string = array{}  # ننشئ مصفوفة لتخزين الأسماء
+            var TotalBasePrice : int = 0
+            var ItemsCount : int = 1
+            
+            if (PlayerLevel >= 6):
+                set ItemsCount = GetRandomInt(1, 3)
+            else if (PlayerLevel >= 3): 
+                set ItemsCount = GetRandomInt(1, 2) 
+
+            # --- [ تعديل المنطق لضمان صنف ساخن وصنف بارد عند اختيار 2 ] ---
+            if (ItemsCount = 2):
+                var HotOptions : []food_item = for (F : AvailableFood, F.NeedsCooking = true) do F
+                var ColdOptions : []food_item = for (F : AvailableFood, F.NeedsCooking = false) do F
+
+                if (HotOptions.Length > 0 and ColdOptions.Length > 0):
+                    # اختيار صنف ساخن واحد عشوائي
+                    RndHot := GetRandomInt(0, HotOptions.Length - 1)
+                    if (SelectedHot := HotOptions[RndHot]):
+                        set SelectedFoodNames = SelectedFoodNames + array{SelectedHot.FoodName}
+                        set TotalBasePrice += SelectedHot.BuyPrice
+
+                    # اختيار صنف بارد واحد عشوائي
+                    RndCold := GetRandomInt(0, ColdOptions.Length - 1)
+                    if (SelectedCold := ColdOptions[RndCold]):
+                        set SelectedFoodNames = SelectedFoodNames + array{SelectedCold.FoodName}
+                        set TotalBasePrice += SelectedCold.BuyPrice
+                else:
+                    # إذا لم يتوفر النوعين، نكتفي بصنف واحد عشوائي
+                    set ItemsCount = 1
+
+            # --- [ منطق اختيار صنف واحد أو 3 أصناف ] ---
+            if (ItemsCount = 1 or ItemsCount = 3):
+                var TempAvailableFood : []food_item = AvailableFood 
+                var HasHotItem : logic = false 
+
+                for (Iteration := 0..ItemsCount - 1):
+                    if (TempAvailableFood.Length > 0):
+                        var FilteredFood : []food_item = array{}
+                        for (Item : TempAvailableFood):
+                            if (HasHotItem = true):
+                                if (Item.NeedsCooking = false):
+                                    set FilteredFood = FilteredFood + array{Item}
+                            else:
+                                set FilteredFood = FilteredFood + array{Item}
+
+                        if (FilteredFood.Length > 0):
+                            if (RndF := GetRandomInt(0, FilteredFood.Length - 1), SelectedFood := FilteredFood[RndF]):
+                                set TotalBasePrice += SelectedFood.BuyPrice
+                                set SelectedFoodNames = SelectedFoodNames + array{SelectedFood.FoodName}
+                                if (SelectedFood.NeedsCooking = true):
+                                    set HasHotItem = true
+                                set TempAvailableFood = for (Item : TempAvailableFood, Item.FoodName <> SelectedFood.FoodName) do Item
+
+            # --- [ إكمال بيانات الطلب ] ---
+            DistrictName := GetDistrictName(SelectedApt.ApartmentID)
+            set LastAptID = SelectedApt.ApartmentID
+            
+            NewOrder := active_order:
+                TargetApartmentID := SelectedApt.ApartmentID
+                FoodName := SelectedFoodNames 
+                FoodIndex := TotalBasePrice 
+                CurrentStatus := order_status.Preparing
+                TimeRemaining := 90.0 + (TimeUpgradeLevel * 10.0)
+                IsVIP := ShouldBeVIP 
+                
+            set CurrentOrder = option{NewOrder}
+            set PreparedItemsCount = 0
+            set ItemsPickedInCurrentOrder = map{}
+            set ActiveOrder = true  
+            UpdateButtonsState() 
+            
+            AllApts := Apartments + VIPApartments 
+            for (Apt : AllApts):
+                Apt.Radar.Disable()
+                Apt.CondButton.Disable()
+                if (Apt.ApartmentID = SelectedApt.ApartmentID):
+                    Apt.CondButton.Enable()
+                    if (ShouldBeVIP = true or HasRadarUpgrade = true):
+                        Apt.Radar.Enable()
+
+            var DisplayNames : string = ""
+            for (Idx -> Name : SelectedFoodNames):
+                if (Idx = 0):
+                    set DisplayNames = Name
+                else:
+                    set DisplayNames = "{DisplayNames} + {Name}"
+
+            OrderSound.Play()
+            UpdateUI(InPlayer)
+            SavePlayerData(InPlayer) 
+            spawn{ StartMasterTimer(InPlayer) }
+            
+        else:
+            Print("❌ خطأ في توفر الطعام أو الشقق")
+
+
+            
+    
+                    
+
+                
+
+   
+                        
+                       
+    OnPackagingPressed(InAgent : agent)<suspends>:void=
+        if (InPlayer := player[InAgent]):
+            var WasUsedForEvent : logic = false
+
+            # --- [1. حسابات مستويات التطوير] ---
+            var BasePackTime : float = 4.0 
+
+            if (Stats := SavedPlayerData[InPlayer]):
+                LevelAsFloat := IntToFloat(Stats.SavedPackLevel)
+                Reduction := LevelAsFloat * 0.5
+                set BasePackTime = if (BasePackTime - Reduction < 1.0) then 1.0 else BasePackTime - Reduction
+                
+                # 🟢 التعديل هنا: نستخدم set فقط لأن المتغير موجود مسبقاً في الكلاس
+                set BonusDeliveryTime = LevelAsFloat * 20.0
+
+            # الوقت الإجمالي الذي سيُعطى للاعب
+            TotalTimeForDelivery := 120.0 + BonusDeliveryTime
+
+            # --- [2. كود الأحداث الكبرى - Event] ---
+            if (IsEventActive?):
+                for (Key -> Req : ActiveEventReqs):
+                    var IsColdFood : logic = false
+                    for (MenuItem : FoodMenu):
+                        if (MenuItem.FoodName = Req.FoodName and MenuItem.NeedsCooking = false):
+                            set IsColdFood = true
+
+                    if (Req.IsFullyPacked = false):
+                        if (Req.IsCookedCount >= Req.RequiredAmount or (IsColdFood? and Req.CurrentBatchCount >= Req.RequiredAmount)):
+                            NewReq := event_requirement{
+                                FoodName := Req.FoodName,
+                                RequiredAmount := Req.RequiredAmount,
+                                CurrentBatchCount := Req.RequiredAmount,
+                                IsCookedCount := Req.RequiredAmount, 
+                                IsFullyPacked := true 
+                            }
+
+                            if (set ActiveEventReqs[Key] = NewReq):
+                                set WasUsedForEvent = true
+                                for (i := 1..Req.RequiredAmount):
+                                    ItemRemover.Remove(InAgent) 
+                                
+                                EventBoxGranter.GrantItem(InAgent) 
+                                HUDMessage.SetText(TextToMsg("✅ تم تغليف {Req.FoodName}!"))
+                                HUDMessage.Show(InPlayer)
+                                UpdateUI(InPlayer)
+
+                if (WasUsedForEvent?):
+                    CheckEventStageTransition(InPlayer)
+
+            # --- [3. كود التغليف العادي] ---
+            if (WasUsedForEvent = false):
+                if (Order := CurrentOrder?):
+                    if (Order.CurrentStatus = order_status.Packaging):
+                        for (i := 1..Order.FoodName.Length):
+                            ItemRemover.Remove(InAgent)
+
+                        BoxGranter.GrantItem(InAgent)
+                        
+                        NewOrder := active_order{
+                            TargetApartmentID := Order.TargetApartmentID,
+                            FoodName := Order.FoodName,
+                            CurrentStatus := order_status.Delivering, 
+                            TimeRemaining := TotalTimeForDelivery,
+                            IsVIP := Order.IsVIP,
+                            FoodIndex := Order.FoodIndex 
+                        }
+                        set CurrentOrder = option{NewOrder}
+                        set CurrentStageName = "توصيل الطلب 🚚"
+                        set StepTimeRemaining = TotalTimeForDelivery
+
+                        HUDMessage.SetText(TextToMsg("📦 تم التغليف, توجه لتوصيل الطلب !"))
+                        HUDMessage.Show(InPlayer)
+                        UpdateUI(InPlayer)
+                    else:
+                        HUDMessage.SetText(TextToMsg("⚠️ الأكل غير جاهز للتغليف بعد!"))
+                        HUDMessage.Show(InPlayer)
+
+            UpdateButtonsState()
+
+    # دالة الانتظار بين الطلبات
+    WaitAfterDelivery(InAgent : agent)<suspends>:void=
+        # 1. تعطيل الزر مؤقتاً لمنع السبام (مهم جداً)
+        NextOrderButton.Disable()
+        
+        # 2. فترة راحة قصيرة (مثلاً 3 ثوانٍ) قبل أن يتمكن اللاعب من طلب أوردر جديد
+        WaitTime := 3.0 
+        Sleep(WaitTime)
+        
+        # 3. تفعيل الزر ليتمكن اللاعب من ضغطه يدوياً
+        NextOrderButton.Enable()
+        
+        # رسالة تنبيه للاعب
+        HUDMessage.SetText(TextToMsg("🔔 يمكنك الآن طلب مهمة جديدة! اضغط زر 'متاح'"))
+        HUDMessage.Show(InAgent)
+        
+        # تحديث حالة الانتظار في الـ UI
+        set IsWaitingForReadyPress = true 
+        if (InPlayer := player[InAgent]):
+            UpdateUI(InPlayer)
+
+    
+    FinishOrder(InAgent : agent, EnteredAptID : int):void=
+        Print("🔔 محاولة تسليم للمنزل: {EnteredAptID}")
+        
+        if (InPlayer := player[InAgent]):
+            # --- [1. مسار الأحداث الكبرى - Special Event Path] ---
+            if (IsEventActive?):
+                var AllReadyForEvent : logic = true
+                
+                # فحص حالة الأصناف: هل كل صنف مر بمساره الصحيح؟
+                for (Req : ActiveEventReqs):
+                    # نتحقق من نوع الصنف في المنيو (بارد أم ساخن)
+                    var ThisItemNeedsCooking : logic = false
+                    for (Food : FoodMenu):
+                        if (Food.FoodName = Req.FoodName and Food.NeedsCooking = true):
+                            set ThisItemNeedsCooking = true
+                    
+                    # المنطق: 
+                    # 1. إذا كان يحتاج طبخ ولسه ما انطبخ -> AllReady = false
+                    # 2. إذا لسه ما تغلف (سواء بارد أو ساخن) -> AllReady = false
+                    if (ThisItemNeedsCooking? and Req.IsCookedCount < Req.RequiredAmount):
+                        set AllReadyForEvent = false
+                    
+                    if (Req.IsFullyPacked = false):
+                        set AllReadyForEvent = false
+
+                # إذا تحقق الشرط النهائي (الكل مطبوخ أو بارد جاهز ومغلف)
+                if (AllReadyForEvent?):
+                    EventReward := 500 
+                    set PlayerMoney += EventReward
+                    EventAccolade.Award(InPlayer)
+                    
+                    set IsEventActive = false
+                    set ActiveEventReqs = map{}
+                    
+                    ItemRemover.Remove(InAgent) 
+                    
+                    HUDMessage.SetText(TextToMsg("🎊 مبروك! اكتمل الحدث الكبير واستلمت مكافأة: {EventReward}$"))
+                    HUDMessage.Show(InPlayer)
+                    
+                    UpdateUI(InPlayer)
+                    UpdateButtonsState()
+                    SavePlayerData(InPlayer)
+                    return 
+                else:
+                    # رسالة تنبيه للاعب إذا حاول التسليم والطلبات ناقصة
+                    HUDMessage.SetText(TextToMsg("⚠️ الطلبية غير مكتملة! تأكد من طبخ الساخن وتغليف كل الأصناف."))
+                    HUDMessage.Show(InPlayer)
+
+            # --- [2. مسار الطلب العادي - Regular Order Path] ---
+            if (Order := CurrentOrder?):
+                # التأكد من حالة الطلب (توصيل)
+                if (Order.CurrentStatus <> order_status.Delivering):
+                    ShowHUD(InAgent, "📦 ارجع للمطبخ! لازم تغلف الأكل أولاً")
+                    return
+
+                # التأكد من رقم الشقة
+                if (EnteredAptID <> Order.TargetApartmentID):
+                    ShowHUD(InAgent, "❌ هذا ليس المنزل المطلوب! اذهب لـ {Order.TargetApartmentID}")
+                    return
+
+                # --- حساب الأداء بناءً على الوقت ---
+                var StarsLabel : string = "⭐⭐⭐"
+                var FinalMessage : string = ""
+                var TimeBonus : int = 0
+
+                # نستخدم BonusDeliveryTime المحسوبة من مستوى التغليف
+                TotalAllowedTime : float = 120.0 + BonusDeliveryTime 
+                HighTime : float = TotalAllowedTime * 0.70
+                LowTime : float = TotalAllowedTime * 0.25
+
+                if (StepTimeRemaining > HighTime):
+                    set StarsLabel = "⭐⭐⭐⭐⭐"
+                    set TimeBonus = 30
+                    if (Msg := HappyMessages[GetRandomInt(0, HappyMessages.Length - 1)]):
+                        set FinalMessage = Msg
+                else if (StepTimeRemaining > LowTime):
+                    set StarsLabel = "⭐⭐⭐"
+                    set TimeBonus = 0
+                    if (Msg := NeutralMessages[GetRandomInt(0, NeutralMessages.Length - 1)]):
+                        set FinalMessage = Msg
+                else:
+                    set StarsLabel = "⭐"
+                    set TimeBonus = -10
+                    if (Msg := AngryMessages[GetRandomInt(0, AngryMessages.Length - 1)]):
+                        set FinalMessage = Msg
+
+                # --- 🛠️ تعطيل أجهزة الشقة (الرادار والزر) ---
+                AllApts := Apartments + VIPApartments 
+                for (Apt : AllApts):
+                    if (Apt.ApartmentID = EnteredAptID):
+                        Apt.CondButton.Disable()
+                        Apt.Radar.Disable()
+
+                # --- حساب الرسوم والأرباح ---
+                # --- حساب الرسوم والأرباح ---
+                DeliveryFee := if (EnteredAptID > 40) then 80 else if (EnteredAptID > 20) then 40 else 15
+
+                var TotalFoodSellPrice : int = 0
+                for (FoodNameInOrder : Order.FoodName):
+                    # نستخدم متغير منطقي للتأكد أننا حسبنا السعر مرة واحدة فقط لكل اسم
+                    var FoundPriceForThisItem : int = 0
+                    
+                    for (MenuItem : FoodMenu):
+                        # شرط إضافي: إذا لم نجد السعر بعد وكان الاسم متطابقاً
+                        if (FoundPriceForThisItem = 0 and MenuItem.FoodName = FoodNameInOrder):
+                            if (CalculatedPrice := Floor[(1.0 * MenuItem.BuyPrice / 12.0) * 3.0]):
+                                set FoundPriceForThisItem = CalculatedPrice + 10
+                            else:
+                                set FoundPriceForThisItem = 15 
+
+                    # نجمع السعر الذي وجدناه للإجمالي
+                    set TotalFoodSellPrice += FoundPriceForThisItem
+
+                BaseReward := TotalFoodSellPrice + DeliveryFee + TimeBonus
+
+                Print("📊 تحليل الحسبة: أكل({TotalFoodSellPrice}) + توصيل({DeliveryFee}) + وقت({TimeBonus}) = {BaseReward}")
+                
+                # --- 👑 حساب الربح النهائي مع الـ VIP ---
+                var FinalReward : int = BaseReward
+                if (Order.IsVIP?):
+                    set FinalReward = BaseReward * 2
+                    VIPOrderAccolade.Award(InPlayer)
+                    NewTarget := GetRandomInt(4, 8)
+                    set NextVIPTarget = NewTarget
+                    Print("💰 مكافأة VIP مضاعفة! الهدف القادم بعد: {NextVIPTarget}")
+
+                var TipEarned : int = 0
+                if (GetRandomInt(1, 100) * 1.0 <= TipChance):
+                    set TipEarned = GetRandomInt(15, MaxTipAmount)
+
+                TotalGains := FinalReward + TipEarned
+
+                # --- تحديث البيانات والحفظ ---
+                set PlayerMoney += TotalGains
+                set CompletedOrders += 1
+                OrderAccolade.Award(InPlayer)
+
+                # 🔥 منطق المستوى (Level Up)
+                if (CompletedOrders >= NextLevelThreshold):
+                    set PlayerLevel += 1
+                    LevelUpAccolade.Award(InPlayer)
+                    set CompletedOrders = 0 
+                    set NextLevelThreshold = (PlayerLevel * PlayerLevel) + 5
+                    LevelUpSFX.Play(InAgent)
+                                
+                    var UnlockedItemsName : string = ""
+                    for (Food : FoodMenu):
+                        if (Food.RequiredLevel = PlayerLevel):
+                            if (UnlockedItemsName = ""):
+                                set UnlockedItemsName = Food.FoodName
+                            else:
+                                set UnlockedItemsName = UnlockedItemsName + " و " + Food.FoodName
+
+                    var FinalDesc : string = "وصلت للمستوى {PlayerLevel} 🎉"
+                    if (not UnlockedItemsName = ""):
+                        set FinalDesc = "وصلت للمستوى {PlayerLevel} 🎉\n تم فتح: {UnlockedItemsName}"
+
+                    LevelUpPopup.SetTitleText(TextToMsg("🆙 مستوى جديد!"))
+                    LevelUpPopup.SetDescriptionText(TextToMsg(FinalDesc))
+                    LevelUpPopup.Show(InAgent)
+                    UpdateButtonsState()
+
+                set TotalDeliveries += 1
+                set Reputation = if (Reputation + 5.0 > 100.0) then 100.0 else Reputation + 5.0
+                
+                # --- تنظيف حالة الطلب الحالي ---
+                set CurrentOrder = false
+                set ActiveOrder = false 
+                set ItemsPickedInCurrentOrder = map{}
+                ItemRemover.Remove(InAgent)      # أزل الأكل من يد اللاعب
+                DisableAptVisuals(EnteredAptID)  # أطفئ علامة الشقة
+
+                # تسجيل مبيعات الماب (باستخدام أول اسم في المصفوفة)
+                if (FoodNameForTracker := Order.FoodName[0]):
+                    CurrentCount := if (Val := DailySalesTracker[FoodNameForTracker]) then Val else 0
+                    if (set DailySalesTracker[FoodNameForTracker] = CurrentCount + 1):
+                        Print("📊 تم تسجيل بيع {FoodNameForTracker}")
+
+                # فحص إغلاق المحل
+                if (CurrentHour >= 20):
+                    set IsShopOpen = false
+                    EndTheDay(InAgent) 
+                    return
+
+                # --- العرض النهائي على الشاشة ---
+                # --- العرض النهائي على الشاشة (تمت إضافة رسوم التوصيل) ---
+                FinalDisplay := "{FinalMessage}\n⭐ التقييم: {StarsLabel}\n 💰 المجموع: {TotalGains}$ ( توصيل: {DeliveryFee}$ | إكرامية: {TipEarned}$)"
+                ShowHUD(InAgent, FinalDisplay)
+
+                if(IsShopOpen = true):
+                    spawn{ WaitAfterDelivery(InAgent) }
+
+                UpdateUI(InPlayer)
+                SavePlayerData(InPlayer)
+                Print("✅ تم التسليم بنجاح وأرشفة البيانات")
+
+            else:
+                # إذا لم يكن هناك حدث ولا طلب عادي
+                ShowHUD(InAgent, "ليس لديك طلب لتسليمه حالياً!")
+
+    # دالة مساعدة لتنظيف الكود (Helper Functions)
+    ShowHUD(Agent : agent, Msg : string):void=
+        HUDMessage.SetText(TextToMsg(Msg))
+        HUDMessage.Show(Agent)
+
+    DisableAptVisuals(AptID : int):void=
+        AllApts := Apartments + VIPApartments 
+        for (Apt : AllApts, Apt.ApartmentID = AptID):
+            Apt.CondButton.Disable()
+            Apt.Radar.Disable()
+
+    CheckLevelUp(InAgent : agent):void=
+        if (InPlayer := player[InAgent]):
+            # الحسبة اللي اخترتها (5 طلبات زيادة كل لفل)
+            LevelThreshold := (PlayerLevel * 5) + 10
+
+            if (CompletedOrders >= LevelThreshold):
+                set PlayerLevel += 1
+                set CompletedOrders = 0 
+                
+                # --- منطق الـ Pop-up ومعرفة الأكلات الجديدة ---
+                var UnlockedItemsName : string = ""
+                for (Food : FoodMenu):
+                    if (Food.RequiredLevel = PlayerLevel):
+                        if (UnlockedItemsName = ""):
+                            set UnlockedItemsName = Food.FoodName
+                        else:
+                            set UnlockedItemsName = "{UnlockedItemsName} و {Food.FoodName}"
+
+                var FinalDesc : string = "وصلت للمستوى {PlayerLevel} 🎉"
+                if (not UnlockedItemsName = ""):
+                    set FinalDesc = "وصلت للمستوى {PlayerLevel} 🎉\n تم فتح: {UnlockedItemsName}"
+
+                # إظهار الـ Pop-up
+                LevelUpPopup.SetTitleText(TextToMsg("🆙 مستوى جديد!"))
+                LevelUpPopup.SetDescriptionText(TextToMsg(FinalDesc))
+                LevelUpPopup.Show(InAgent)
+                
+                # تحديثات النظام
+                UpdateButtonsState()
+                UpdateUI(InPlayer)
+                SavePlayerData(InPlayer) # حفظ التطور فوراً
+                Print("🚀 تم ترقية اللاعب وإظهار الـ Pop-up وحفظ البيانات")
+
+    # --- التطويرات ---
+    
+    #OnBonusUpgradePressed(InAgent : agent):void=
+     #   if (InPlayer := player[InAgent]):
+      #      Cost := 1000 + (BonusUpgradeLevel * 500)
+       #     if (PlayerMoney >= Cost):
+        #        set PlayerMoney -= Cost
+         #       set BonusUpgradeLevel += 1
+                
+                # تحديث الواجهة للأرقام الجديدة
+          #      UpdateUI(InPlayer)
+                
+                # ✅ تحديث حالة الأزرار (عشان لو السعر الجديد صار غالي يقفل الزر)
+           #     UpdateButtonsState()
+                
+                # ✅ حفظ البيانات فوراً بعد التطوير
+            #    SavePlayerData(InPlayer)
+                
+             #   Print("🛠️ تم تطوير البونص إلى لفل {BonusUpgradeLevel} وحفظ البيانات")
+        #    else:
+                # رسالة بسيطة إذا ما معه فلوس (اختياري)
+        #       HUDMessage.SetText(TextToMsg("❌ لا تملك مالاً كافياً! تحتاج {Cost}$"))
+        #      HUDMessage.Show(InAgent)
+
+    
+    StartOrderTimer(InPlayer : player, Order : active_order)<suspends>:void=
+        loop:
+            Sleep(1.0) # انتظر ثانية
+            if (CurrentOrder?):
+
+                set Order.TimeRemaining -= 1.0
+                
+                # تحديث الواجهة كل ثانية ليظهر الوقت وهو ينقص
+                UpdateUI(InPlayer)
+
+            if (Order.TimeRemaining <= 0.0):
+                
+                set CurrentOrder = false # إلغاء الطلب الحالي لأنه تأخر جداً
+                set Reputation -= 10.0  # خصم سمعة فقط
+                UpdateUI(InPlayer)
+                UpdateButtonsState()
+                HUDMessage.SetText(TextToMsg("⏰ انتهى وقت الطلب! حاول في طلب آخر"))
+                HUDMessage.Show(InPlayer)
+                break
+
+    
+
+        
+   
+
+    # تطوير الشنطة الحرارية (تزيد وقت مرحلة التوصيل)
+    OnUpgradeHeatBag(InAgent : agent):void=
+        if (InPlayer := player[InAgent]):
+            if (PlayerMoney >= HeatBagPrice):
+                set PlayerMoney -= HeatBagPrice
+                set HeatBagLevel += 1
+                UpdateUI(InPlayer)
+                SavePlayerData(InPlayer)
+                HUDMessage.SetText(TextToMsg("🎒 تم التطوير! السعر: {HeatBagPrice}$"))
+                HUDMessage.Show(InAgent)
+            else:
+                HUDMessage.SetText(TextToMsg("❌ تحتاج إلى {HeatBagPrice}$"))
+                HUDMessage.Show(InAgent)
+    
+    # دالة "تنتظر" الضغطة لكل زر بشكل مستقل
+    AwaitButtonPress(Button : button_device, Index : int)<suspends> : void =
+        loop:
+            # --- [1. فحص وتحديث حالة الزر] ---
+            if (Order := CurrentOrder?):
+                var IsNeeded : logic = false
+                if (SelectedFood := FoodMenu[Index]):
+                    for (ReqName : Order.FoodName):
+                        if (ReqName = SelectedFood.FoodName):
+                            set IsNeeded = true
+                
+                # تفعيل الزر فقط في مرحلة التحضير وإذا كان الصنف مطلوباً
+                if (IsNeeded = true and Order.CurrentStatus = order_status.Preparing):
+                    Button.Enable()
+                else:
+                    Button.Disable() 
+
+            # --- [2. انتظار ضغطة اللاعب] ---
+            Agent := Button.InteractedWithEvent.Await()
+            
+            if (InPlayer := player[Agent], SelectedFood := FoodMenu[Index]):
+                if (SelectedFood.Stock > 0):
+                    var WasUsedForEvent : logic = false
+
+                   # --- [3. منطق الحدث الخاص - المطور ] ---
+                    if (IsEventActive?):
+                        for (Key -> Req : ActiveEventReqs):
+                            if (WasUsedForEvent = false and Req.FoodName = SelectedFood.FoodName and Req.CurrentBatchCount < Req.RequiredAmount):
+                                if (set FoodMenu[Index].Stock = SelectedFood.Stock - 1):
+                                    # 🟢 التحديث السحري للعداد هنا:
+                                    NewReq := event_requirement{
+                                        FoodName := Req.FoodName,
+                                        RequiredAmount := Req.RequiredAmount,
+                                        CurrentBatchCount := Req.CurrentBatchCount + 1, # زيادة العداد
+                                        IsCookedCount := Req.IsCookedCount,
+                                        IsFullyPacked := Req.IsFullyPacked
+                                    }
+                                    
+                                    if (set ActiveEventReqs[Key] = NewReq):
+                                        set WasUsedForEvent = true
+                                        SelectedFood.ItemGranter.GrantItem(Agent)
+                                        
+                                        # فحص هل اكتملت المكونات للانتقال للمرحلة التالية
+                                        CheckEventStageTransition(InPlayer) 
+                                        
+                                        UpdateUI(InPlayer) # تحديث الشاشة فوراً (0/5 تصبح 1/5)
+                                        UpdateButtonsState()
+                                        SavePlayerData(InPlayer)
+
+                    # --- [4. منطق الطلب العادي - الحماية من التكرار والحذف] ---
+                    if (WasUsedForEvent = false):
+                        if (Order := CurrentOrder?):
+                            
+                            # الحالة الأولى: مرحلة التحضير (Preparing)
+                            if (Order.CurrentStatus = order_status.Preparing):
+                                AlreadyPicked := if (Val := ItemsPickedInCurrentOrder[SelectedFood.FoodName]) then Val else false
+                                
+                                if (AlreadyPicked = false):
+                                    if (set FoodMenu[Index].Stock = SelectedFood.Stock - 1):
+                                        if (SelectedFood.NeedsCooking = false):
+                                            # منح السلطة/البارد لأول مرة
+                                            SelectedFood.CookedGranter.GrantItem(Agent)
+                                            
+                                        else:
+                                            # منح البيتزا النيئة
+                                            SelectedFood.ItemGranter.GrantItem(Agent)
+
+                                        SavePlayerData(InPlayer)
+
+                                        if (set ItemsPickedInCurrentOrder[SelectedFood.FoodName] = true):
+                                            Print("تم سحب {SelectedFood.FoodName} بنجاح")
+
+                                        set PreparedItemsCount += 1
+                                        HUDMessage.SetText(TextToMsg("✅ تم تجهيز {SelectedFood.FoodName} ({PreparedItemsCount}/{Order.FoodName.Length})"))
+                                        HUDMessage.Show(Agent)
+
+                                        # التحقق من الانتقال للمرحلة التالية
+                                        if (PreparedItemsCount >= Order.FoodName.Length):
+                                            var NeedsAnyCooking : logic = false
+                                            for (OrderedFoodName : Order.FoodName):
+                                                for (MenuItem : FoodMenu):
+                                                    if (MenuItem.FoodName = OrderedFoodName and MenuItem.NeedsCooking = true):
+                                                        set NeedsAnyCooking = true
+
+                                            var NextStatus : order_status = order_status.Cooking
+                                            if (NeedsAnyCooking = false):
+                                                set NextStatus = order_status.Packaging
+
+                                            NewOrder := active_order:
+                                                TargetApartmentID := Order.TargetApartmentID
+                                                FoodName := Order.FoodName
+                                                FoodIndex := Order.FoodIndex
+                                                CurrentStatus := NextStatus 
+                                                TimeRemaining := Order.TimeRemaining
+                                                IsVIP := Order.IsVIP
+
+                                            set CurrentOrder = option{NewOrder}
+                                            set PreparedItemsCount = 0 
+                                            UpdateUI(InPlayer)
+                                            UpdateButtonsState()
+                                            SavePlayerData(InPlayer)
+
+                            # الحالة الثانية: مرحلة الطبخ (Cooking) - هنا يتم منع حذف السلطة
+                           else if (Order.CurrentStatus = order_status.Cooking):
+
+                            # بمجرد الضغط، نسلم كل شيء وننقل الحالة لـ Packaging لمنع الضغط مرة أخرى
+                            for (FoodNameInOrder : Order.FoodName):
+                                for (MenuItem : FoodMenu):
+                                    if (MenuItem.FoodName = FoodNameInOrder):
+                                        if (MenuItem.NeedsCooking = true):
+                                            MenuItem.CookedGranter.GrantItem(Agent)
+                                        else:
+                                            MenuItem.CookedGranter.GrantItem(Agent)
+                            
+                            # تحويل الحالة فوراً لتغليف
+                            NewOrder := active_order{
+                                TargetApartmentID := Order.TargetApartmentID,
+                                FoodName := Order.FoodName,
+                                CurrentStatus := order_status.Packaging, # انتقل للتغليف فوراً
+                                TimeRemaining := Order.TimeRemaining,
+                                IsVIP := Order.IsVIP,
+                                FoodIndex := Order.FoodIndex
+                            }
+                            set CurrentOrder = option{NewOrder}
+                            UpdateButtonsState() # سيقوم هذا بتعطيل زر الطبخ فوراً
+
+                else:
+                    HUDMessage.SetText(TextToMsg("⚠️ المخزون نفد!"))
+                    HUDMessage.Show(Agent)
+
+    CheckEventStageTransition(InPlayer : player):void=
+        var AllGathered : logic = true
+        var AllCooked : logic = true
+
+        for (Req : ActiveEventReqs):
+            if (Req.CurrentBatchCount < Req.RequiredAmount):
+                 set AllGathered = false
+            if (Req.IsCookedCount < Req.RequiredAmount):
+                 set AllCooked = false
+
+        if (AllCooked?):
+            set CurrentStageName = "مرحلة التغليف 📦"
+        else if (AllGathered?):
+            set CurrentStageName = "مرحلة الطبخ 🔥"
+        else:
+            set CurrentStageName = "مرحلة التحضير 👨‍🍳"
+
+    # دالة يتم استدعاؤها عند تسليم "كرتونة الحدث" للزر المشروط في الموقع
+    OnEventBoxDelivered(InAgent : agent):void=
+        if (InPlayer := player[InAgent]):
+            # 1. التأكد أن هناك حدث نشط حالياً
+            if (IsEventActive?):
+                # 2. منح المكافأة الكبرى
+                EventReward := EventRewardAmount
+                set PlayerMoney += EventReward
+                
+                # زيادة عداد الطلبات المكتملة لرفع المستوى (نعطيه 5 نقاط دفعة واحدة)
+                set CompletedOrders += 5 
+                
+                # 3. إغلاق الحدث وتصفير البيانات فوراً
+                set IsEventActive = false
+                set ActiveEventReqs = map{} # تصفير المتطلبات للحدث القادم
+                
+                # 4. إيقاف الرادارات (الخريطة)
+                RadarPark.Disable()
+                RadarSchool.Disable()
+                
+                # 5. رسائل النجاح
+                HUDMessage.SetText(TextToMsg("🎊 كفو! تم تسليم طلبية {CurrentEventLocation} واستلمت {EventReward}$!"))
+                HUDMessage.Show(InPlayer)
+                
+                # 6. تحديث الواجهة وفحص الليفل
+                UpdateUI(InPlayer)
+                CheckLevelUp(InPlayer)
+                # 💾 حفظ البيانات فوراً بعد استلام الجائزة وتحديث الليفل
+                SavePlayerData(InPlayer)
+                
+                # تمكين زر الطلبات العادية مرة أخرى
+                NextOrderButton.Enable()
+                
+                Print("✅ الحدث انتهى بنجاح وتم توزيع الجوائز.")
+
+    CheckSelection(InAgent : agent) : void =
+        if (InPlayer := player[InAgent], Order := CurrentOrder?):
+            var MatchFound : logic = false
+            
+            for (Index -> Food : FoodMenu): # استخدمنا Index هنا لنتمكن من تعديل الـ Stock في المصفوفة
+                if (Order.FoodName.Find[Food.FoodName]):
+                    set MatchFound = true
+                    
+                    # 1. التحقق من المستوى
+                    if (PlayerLevel >= Food.RequiredLevel):
+                        
+                        # 2. التحقق من وجود مخزون كافٍ
+                        if (Food.Stock > 0):
+                            # خصم حبة واحدة من المخزون وتحديث المصفوفة
+                            if (set FoodMenu[Index].Stock = Food.Stock - 1):
+                                Food.ItemGranter.GrantItem(InAgent)
+                                HUDMessage.SetText(TextToMsg("✅ استلمت {Food.FoodName} (المتبقي: {Food.Stock - 1})"))
+                                
+                                # سطر الانتقال: ننتقل للطبخ
+                                set Order.CurrentStatus = order_status.Cooking
+                                UpdateButtonsState()
+                                
+                                # 💾 حفظ البيانات فوراً (المخزون الجديد وحالة الطلب)
+                                SavePlayerData(InPlayer)
+                                UpdateUI(InPlayer)
+                        else:
+                            HUDMessage.SetText(TextToMsg("⚠️ المخزون نفد! اشترِ المزيد من المتجر"))
+                            HUDMessage.Show(InAgent)
+                    else:
+                        HUDMessage.SetText(TextToMsg("🔒 ليفلك قليل! تحتاج ليفل {Food.RequiredLevel}"))
+                    
+                    HUDMessage.Show(InAgent)
+            
+            if (MatchFound = false):
+                HUDMessage.SetText(TextToMsg("❌ هذا ليس طلبك الحالي!"))
+                HUDMessage.Show(InAgent)
+                
+                
+    # دالة لتحديث حالة الأزرار بناءً على المستوى
+    UpdateButtonsState():void=
+        # 1. إغلاق أزرار المنيو كقاعدة عامة
+        for (FoodItem : FoodMenu):
+            FoodItem.Button.Disable()
+
+        # 2. التحكم في أزرار المنيو (للحدث أو الطلب العادي)
+        if (IsEventActive?):
+            for (Key -> Req : ActiveEventReqs):
+                for (FoodItem : FoodMenu):
+                    if (FoodItem.FoodName = Req.FoodName):
+                        if (Req.CurrentBatchCount < Req.RequiredAmount):
+                            FoodItem.Button.Enable()
+
+        # --- التعديل هنا لدعم حالة الاحتراق (Burnt) ---
+        else if (Order := CurrentOrder?):
+            # إذا كانت الحالة "تحضير" أو "محروق"، نفتح أزرار المنيو ليأخذ اللاعب أغراض
+            if (Order.CurrentStatus = order_status.Preparing):
+                for (FoodItem : FoodMenu):
+                    if (PlayerLevel >= FoodItem.RequiredLevel):
+                        for (OrderedFoodName : Order.FoodName):
+                            if (FoodItem.FoodName = OrderedFoodName):
+                                FoodItem.Button.Enable()
+
+        # 3. تفعيل الفرن والتغليف
+        var ShouldOvenBeOpen : logic = false
+        var ShouldPackagingBeOpen : logic = false
+        var ShouldEventDeliveryBeOpen : logic = false 
+
+        if (IsEventActive?):
+            var AllEventItemsPacked : logic = true 
+            for (Key -> Req : ActiveEventReqs):
+                if (Req.CurrentBatchCount >= Req.RequiredAmount and Req.IsCookedCount < Req.CurrentBatchCount):
+                    set ShouldOvenBeOpen = true
+                
+                if (Req.IsCookedCount >= Req.RequiredAmount and Req.IsFullyPacked = false):
+                    set ShouldPackagingBeOpen = true
+                
+                if (Req.IsFullyPacked = false):
+                    set AllEventItemsPacked = false
+            
+            if (AllEventItemsPacked?):
+                set ShouldEventDeliveryBeOpen = true
+
+        else if (Order := CurrentOrder?):
+            # منطق الطلب العادي
+            if (Order.CurrentStatus = order_status.Cooking):
+                var OrderNeedsCooking : logic = false
+                for (OrderedFoodName : Order.FoodName):
+                    for (MenuItem : FoodMenu):
+                        if (MenuItem.FoodName = OrderedFoodName and MenuItem.NeedsCooking = true):
+                            set OrderNeedsCooking = true
+                
+                if (OrderNeedsCooking = true):
+                    set ShouldOvenBeOpen = true
+
+            # التعديل: التغليف يفتح فقط إذا كانت الحالة Packaging
+            else if (Order.CurrentStatus = order_status.Packaging):
+                set ShouldPackagingBeOpen = true
+
+        # 4. تطبيق الحالة النهائية للأجهزة
+        if (ShouldOvenBeOpen?):
+            CookingButton.Enable()
+        else:
+            CookingButton.Disable()
+
+        if (ShouldPackagingBeOpen?):
+            PackagingButton.Enable()
+        else:
+            PackagingButton.Disable()
+
+        # 6. تفعيل أزرار الشقق للطلبات العادية
+        if (not IsEventActive?):
+            if (Order := CurrentOrder?):
+                for (Apt : Apartments + VIPApartments):
+                    if (Order.CurrentStatus = order_status.Delivering and Apt.ApartmentID = Order.TargetApartmentID):
+                        Apt.CondButton.Enable()
+                    else:
+                        Apt.CondButton.Disable()
+            else:
+                for (Apt : Apartments + VIPApartments):
+                    Apt.CondButton.Disable()
+
+   
+
+    # --- الواجهة الرئيسية (التجميع النهائي المضمون) ---
+    # --- دالة بناء الكرت (Card) ---
+    # نستخدم \n يدوياً في النصوص الطويلة لضمان عدم خروج النص
+    CreateUpgradeCard(Title: string, Desc: string, BuyBtn: widget) : widget =
+        overlay:
+            Slots := array:
+                # 1. التوهج الخارجي
+                overlay_slot:
+                    Widget := color_block{DefaultColor := MakeColorFromHex("FFD70005"), DefaultDesiredSize := vector2{X := 270.0, Y := 280.0}}
+
+                # 2. الإطار المعدني الخارجي
+                overlay_slot:
+                    Widget := color_block{DefaultColor := MakeColorFromHex("1A1A1AFF"), DefaultDesiredSize := vector2{X := 234.0, Y := 254.0}}
+
+                # 3. إطار الذهب المسحوب
+                overlay_slot:
+                    Padding := margin{Top := 2.0, Bottom := 2.0, Left := 2.0, Right := 2.0}
+                    Widget := color_block{DefaultColor := MakeColorFromHex("C5A021FF"), DefaultDesiredSize := vector2{X := 240.0, Y := 250.0}}
+
+                # 4. جسم الكرت الأسود
+                overlay_slot:
+                    Padding := margin{Top := 8.0, Bottom := 8.0 , Right := 8.0 , Left := 8.0}
+                    Widget := color_block{DefaultColor := MakeColorFromHex("0A0A0BFF"), DefaultDesiredSize := vector2{X := 224.0, Y := 234.0}}
+
+                # 6. المحتوى الداخلي
+                overlay_slot:
+                    Widget := stack_box:
+                        Orientation := orientation.Vertical
+                        Slots := array:
+                            # قسم العنوان
+                            stack_box_slot:
+                                Padding := margin{Top := 15.0} # قللنا المسافة من الأعلى
+                                HorizontalAlignment := horizontal_alignment.Center
+                                Widget := overlay:
+                                    Slots := array:
+                                        overlay_slot:
+                                            VerticalAlignment := vertical_alignment.Bottom
+                                            Widget := color_block{DefaultColor := MakeColorFromHex("FFD70033"), DefaultDesiredSize := vector2{X := 160.0, Y := 1.5}} # صغرنا خط الديكور
+                                        overlay_slot:
+                                            Padding := margin{Bottom := 5.0}
+                                            Widget := text_block:
+                                                DefaultText := TextToMsg(Title)
+                                                DefaultTextColor := MakeColorFromHex("FFD700FF")
+                                                # ملاحظة: حجم الخط الفعلي نتحكم به في إعدادات جهاز الـ UI أو عبر TextBlock
+                                                # إذا كان كبيراً جداً، سيظهر خارج الكرت.
+
+                            # قسم الوصف
+                            stack_box_slot:
+                                Distribution := option{1.0}
+                                Padding := margin{Left := 10.0, Right := 10.0, Top := 10.0, Bottom := 10.0} # قللنا الـ Padding بشكل كبير
+                                Widget := text_block:
+                                    DefaultText := TextToMsg(Desc)
+                                    DefaultTextColor := MakeColorFromHex("CCCCCCFF")
+                                    # هنا سيتم توزيع النص تلقائياً
+
+                            # --- قسم الزر المحصن ---
+                            stack_box_slot:
+                                Padding := margin{Bottom := 15.0} # رفعنا الزر قليلاً للأعلى
+                                HorizontalAlignment := horizontal_alignment.Center
+                                Widget := canvas:
+                                    Slots := array:
+                                        canvas_slot:
+                                            Anchors := anchors{Minimum := vector2{X := 0.5, Y := 0.5}, Maximum := vector2{X := 0.5, Y := 0.5}}
+                                            Alignment := vector2{X := 0.5, Y := 0.5}
+                                            # جعلنا عرض الزر 140 ليتناسب مع عرض الكرت 250
+                                            Offsets := margin{Left := 0.0, Top := 0.0, Right := 140.0, Bottom := 40.0} 
+                                            SizeToContent := false
+                                            Widget := BuyBtn
+
+                            # --- قسم الزر المحمي ---
+                            # --- قسم الزر المحصن بـ Canvas ---
+                            stack_box_slot:
+                                Padding := margin{Bottom := 5.0} # مساحة مخصصة للزر
+                                HorizontalAlignment := horizontal_alignment.Center
+                                Widget := canvas:
+                                    Slots := array:
+                                        canvas_slot:
+                                            # جعل الزر في منتصف منطقة الكانفاس
+                                            Anchors := anchors{Minimum := vector2{X := 0.5, Y := 0.5}, Maximum := vector2{X := 0.5, Y := 0.5}}
+                                            Alignment := vector2{X := 0.5, Y := 0.5}
+                                            # هنا نحدد الحجم الإجباري (Offsets تحل محل Size)
+                                            Offsets := margin{Left := 0.0, Top := 0.0, Right := 150.0, Bottom := 50.0} #250/100
+                                            SizeToContent := false # أهم خاصية: تمنع الزر من التمدد مهما طال النص
+                                            Widget := BuyBtn
+
+
+
+
+
+   # دالة مساعدة للتحكم في ظهور التبويب بناءً على الاختيار
+    GetVisibility(Current : int, Target : int):widget_visibility=
+        if (Current = Target):
+            widget_visibility.Visible
+        else:
+            widget_visibility.Collapsed
+
+    UpdateTabsVisibility():void=
+        UpgradesTab.SetVisibility(if (CurrentTab = 0) then widget_visibility.Visible else widget_visibility.Collapsed)
+        PurchasesTab.SetVisibility(if (CurrentTab = 1) then widget_visibility.Visible else widget_visibility.Collapsed)
+        BillsTab.SetVisibility(if (CurrentTab = 2) then widget_visibility.Visible else widget_visibility.Collapsed)
+        ProductsTab.SetVisibility(if (CurrentTab = 3) then widget_visibility.Visible else widget_visibility.Collapsed)
+
+    # --- القائمة الرئيسية المحدثة بالكامل ---
+    ShowUpgradeMenu(InPlayer : player):void=
+        if (PlayerUI := GetPlayerUI[InPlayer]):
+            # 1. حساب الأسعار والبيانات (كما هي تماماً)
+            PricePrep := BasePrice + (PrepLevel * 200)
+            PriceCook := BasePrice + (CookLevel * 200)
+            PricePack := BasePrice + (PackLevel * 200)
+            PriceWarehouse := 500 + (WarehouseLevel * 300)
+
+            
+          
+
+
+                # 2. تجهيز الرسالة (Status Text) - قمنا بتعريفها هنا لمرة واحدة فقط
+            set StatusTextWidget = text_block:
+                DefaultText := TextToMsg(ShopStatusMessage)
+                DefaultTextColor := StatusColor
+
+            # 2. تجهيز الأزرار (كل الأزرار موجودة)
+            BtnPrep := button_loud{DefaultText := TextToMsg(" {PricePrep}$")} # تطوير التحضير 
+            BtnPrep.OnClick().Subscribe(HandlePrepClick)
+            
+            BtnCook := button_loud{DefaultText := TextToMsg(" {PriceCook}$")} #تطوير الفرن 
+            BtnCook.OnClick().Subscribe(HandleCookClick)
+            
+            BtnPack := button_loud{DefaultText := TextToMsg(" {PricePack}$")} # تطوير الحقيبة
+            BtnPack.OnClick().Subscribe(HandlePackClick)
+
+            BtnWarehouse := button_loud{DefaultText := TextToMsg("{PriceWarehouse}$")}
+            BtnWarehouse.OnClick().Subscribe(HandleWarehouseClick)
+
+            BtnPayElec := button_loud{DefaultText := TextToMsg("{DebtElectricity}$")} # دفع كهرباء
+            BtnPayElec.OnClick().Subscribe(PayElectricityBill)
+
+            BtnPayRent := button_loud{DefaultText := TextToMsg( "{DebtRent}$")} #دفع ايجار 
+            BtnPayRent.OnClick().Subscribe(PayRentBill)
+
+            BtnTabUpgrades := button_regular{DefaultText := TextToMsg("🔧 التطويرات")}
+            BtnTabUpgrades.OnClick().Subscribe(HandleTabUpgrades)
+            
+            BtnTabPurchases := button_regular{DefaultText := TextToMsg("🛒 المشتريات")}
+            BtnTabPurchases.OnClick().Subscribe(HandleTabPurchases)
+
+            BtnTabBills := button_regular{DefaultText := TextToMsg("💸 الفواتير")}
+            BtnTabBills.OnClick().Subscribe(HandleTabBills)
+
+            BtnTabProducts := button_regular{DefaultText := TextToMsg("📦 المنتجات")}
+            BtnTabProducts.OnClick().Subscribe(HandleTabProducts)
+
+            ExitBtn := button_regular{DefaultText := TextToMsg(" X ")}
+            ExitBtn.OnClick().Subscribe(CloseAllUI)
+
+            BtnUpgradeWarehouse := button_loud{DefaultText := TextToMsg("{PriceWarehouse}$")}
+            BtnUpgradeWarehouse.OnClick().Subscribe(HandleWarehouseClick)
+
+            # أزرار التنقل (Next/Prev)
+            BtnNext := button_regular{DefaultText := TextToMsg("التالي ▶")}
+            BtnNext.OnClick().Subscribe(NextPageAction)
+            BtnPrev := button_regular{DefaultText := TextToMsg("◀ السابق")}
+            BtnPrev.OnClick().Subscribe(PrevPageAction)
+
+            
+            
+
+           # =========== التــطويرات =============
+            
+            var UpgradeRow1 : []stack_box_slot = array{}
+            var UpgradeRow2 : []stack_box_slot = array{}
+
+            AllUpgradeCards : []widget = array:
+                CreateUpgradeCard("التحضير", "وقت إضافي", BtnPrep)
+                CreateUpgradeCard("الطبخ", "سرعة النضج", BtnCook)
+                CreateUpgradeCard("الحقيبة", "حماية الجودة", BtnPack)
+                CreateUpgradeCard("المخزن", "زيادة  (+50)", BtnUpgradeWarehouse)
+               
+
+            for (Index -> Card : AllUpgradeCards):
+                if (Index < 3):
+                    set UpgradeRow1 += array{stack_box_slot{Padding := margin{Right := 10.0}, Widget := Card}}
+                else:
+                    set UpgradeRow2 += array{stack_box_slot{Padding := margin{Right := 10.0}, Widget := Card}}
+
+            # التجميع النهائي باستخدام stack_box عمودي
+            set UpgradesTab = stack_box:
+                Orientation := orientation.Vertical
+                Slots := array:
+                    # الصف الأول
+                    stack_box_slot:
+                        Widget := stack_box:
+                            Orientation := orientation.Horizontal
+                            Slots := UpgradeRow1
+                    # الصف الثاني مع إضافة Padding من الأعلى لعمل مسافة (Spacing)
+                    stack_box_slot:
+                        Padding := margin{Top := 20.0} # هنا وضعنا المسافة بين الصفين
+                        Widget := stack_box:
+                            Orientation := orientation.Horizontal
+                            Slots := UpgradeRow2
+
+
+
+            # =========== المشتريات ============== 
+
+            BtnRadar := button_loud{DefaultText := TextToMsg("شراء (1,000$)")}
+            BtnRadar.OnClick().Subscribe(HandleRadarClick) 
+            BtnVIP := button_loud{DefaultText := TextToMsg("تفعيل VIP (2,000)$")}
+            BtnVIP.OnClick().Subscribe(HandleVIPClick)
+
+            set PurchasesTab = stack_box:
+                Orientation := orientation.Vertical
+                Slots := array:
+                    # --- التعديل هنا ---
+                    
+                    stack_box_slot:
+                        Widget := stack_box:
+                            Orientation := orientation.Horizontal
+                            Slots := array:
+                                stack_box_slot{Padding := margin{Right := 10.0}, Widget := CreateUpgradeCard("رادار التوصيل", "تحديد المنازل", BtnRadar)}
+                                stack_box_slot{Widget := CreateUpgradeCard("نظام الـ VIP", "طلبات الأثرياء", BtnVIP)}
+
+
+            # ============= الفواتير ================ 
+
+            set BillsTab = stack_box:
+                Orientation := orientation.Horizontal
+                Slots := array:
+                    
+                    stack_box_slot{Padding := margin{Right := 10.0}, Widget := CreateUpgradeCard("الكهرباء", "دفع الفاتورة", BtnPayElec)}
+                    stack_box_slot{Padding := margin{Right := 10.0}, Widget := CreateUpgradeCard("الإيجار", "دفع الإيجار", BtnPayRent)}
+                    
+
+            # ========== المنتجات ============
+
+            set PageWidgets = array{}
+            set UIBuyButtons = map{} 
+            TotalPages : int = if (TempPages := Ceil[1.0 * FoodMenu.Length / 1.0 * ItemsPerPage]) then Floor(TempPages) else 1
+            
+
+            for (PageIndex := 0..TotalPages - 1):
+                var Row1Items : []stack_box_slot = array{}
+                var Row2Items : []stack_box_slot = array{}
+                
+                PStartIdx := PageIndex * ItemsPerPage
+                PEndIdx := if (PStartIdx + ItemsPerPage - 1 < FoodMenu.Length) then PStartIdx + ItemsPerPage - 1 else FoodMenu.Length - 1
+
+                for (Index := PStartIdx..PEndIdx):
+                    if (Item := FoodMenu[Index]):
+                        var BtnBuy : button_loud = button_loud{}
+                        if (PlayerLevel >= Item.RequiredLevel):
+                            set BtnBuy = button_loud{DefaultText := TextToMsg("شراء ")}
+                            if (set UIBuyButtons[BtnBuy] = Index):
+                                BtnBuy.OnClick().Subscribe(OnBuyBtnClicked)
+                        else:
+                            set BtnBuy = button_loud{DefaultText := TextToMsg("🔒 لفل {Item.RequiredLevel}")}
+
+                        CurrentCard := CreateUpgradeCard(Item.FoodName, "المخزون: {Item.Stock}", BtnBuy)
+                        
+                        
+                        if (Index - PStartIdx < 3):
+                            set Row1Items += array{stack_box_slot{Padding := margin{Right := 10.0}, Widget := CurrentCard}}
+                        else:
+                            set Row2Items += array{stack_box_slot{Padding := margin{Right := 10.0}, Widget := CurrentCard}}
+
+                # إنشاء الصفحة (Stack Box)
+                PageLayer := stack_box:
+                    Orientation := orientation.Vertical
+                    Slots := array:
+                        stack_box_slot{Padding := margin{Top := 10.0}, Widget := stack_box{Orientation := orientation.Horizontal, Slots := Row1Items}}
+                        stack_box_slot{Padding := margin{Top := 10.0}, Widget := stack_box{Orientation := orientation.Horizontal, Slots := Row2Items}}
+                
+                # ضبط الظهور الابتدائي بناءً على CurrentPage
+                PageLayer.SetVisibility(if (PageIndex = CurrentPage) then widget_visibility.Visible else widget_visibility.Collapsed)
+                set PageWidgets += array{PageLayer}
+
+            # تجميع الـ ProductsTab النهائي
+            # تجميع الـ ProductsTab النهائي (بدون الرسالة المكررة)
+            set ProductsTab = stack_box:
+                Orientation := orientation.Vertical
+                Slots := array:
+                    # حذفنا سطر الـ ShopStatusMessage من هنا
+                    stack_box_slot:
+                        Widget := overlay:
+                            Slots := for (StoredPage : PageWidgets) do overlay_slot{Widget := StoredPage}
+                    stack_box_slot:
+                        Padding := margin{Top := 20.0}
+                        HorizontalAlignment := horizontal_alignment.Center
+                        Widget := stack_box:
+                            Orientation := orientation.Horizontal
+                            Slots := array:
+                                stack_box_slot{Padding := margin{Right := 20.0}, Widget := BtnPrev} 
+                                stack_box_slot{Padding := margin{Right := 20.0}, Widget := ExitBtn}
+                                stack_box_slot{Widget := BtnNext}
+
+
+
+            # =============== نظام البنك =============== 
+
+           
+
+
+
+            # --- تطبيق الـ Visibility للتبويبات ---
+            UpgradesTab.SetVisibility(if (CurrentTab = 0) then widget_visibility.Visible else widget_visibility.Collapsed)
+            PurchasesTab.SetVisibility(if (CurrentTab = 1) then widget_visibility.Visible else widget_visibility.Collapsed)
+            BillsTab.SetVisibility(if (CurrentTab = 2) then widget_visibility.Visible else widget_visibility.Collapsed)
+            ProductsTab.SetVisibility(if (CurrentTab = 3) then widget_visibility.Visible else widget_visibility.Collapsed)
+            
+           # 4. الكانفاس النهائي
+            
+            
+
+            # 4. الكانفاس النهائي
+            NewCanvas := canvas:
+                Slots := array:
+                    canvas_slot:
+                        ZOrder := 0
+                        Anchors := anchors{Minimum := vector2{X := 0.0, Y := 0.0}, Maximum := vector2{X := 1.0, Y := 1.0}}
+                        Widget := texture_block{DefaultImage := Delivery.DeliveryTextureUI, DefaultDesiredSize := vector2{X := 1300.0, Y := 900.0}}
+                    canvas_slot:
+                        ZOrder := 1
+                        Anchors := anchors{Minimum := vector2{X := 0.5, Y := 0.5}, Maximum := vector2{X := 0.5, Y := 0.5}}
+                        Alignment := vector2{X := 0.5, Y := 0.5}
+                        Widget := stack_box:
+                            Orientation := orientation.Vertical
+                            Slots := array:
+                                stack_box_slot{HorizontalAlignment := horizontal_alignment.Center, Widget := text_block{DefaultText := TextToMsg("🌐 SHOP DELIVERY"), DefaultTextColor := NamedColors.Gold}}
+                                stack_box_slot:
+                                    HorizontalAlignment := horizontal_alignment.Center
+                                    Padding := margin{Top := 5.0, Bottom := 10.0}
+                                    Widget := text_block:
+                                        DefaultText := TextToMsg("📦 سعة المخزن : {CalculateTotalStock()} / {GlobalMaxCapacity}  |  💰 رصيد المال : {PlayerMoney}$")
+                                        DefaultTextColor := NamedColors.White
+                                stack_box_slot:
+                                    HorizontalAlignment := horizontal_alignment.Center
+                                    Widget := stack_box:
+                                        Orientation := orientation.Horizontal
+                                        Slots := array:
+                                            stack_box_slot{Padding := margin{Right := 5.0}, Widget := BtnTabUpgrades}
+                                            stack_box_slot{Padding := margin{Right := 5.0}, Widget := BtnTabPurchases}
+                                            stack_box_slot{Padding := margin{Right := 5.0}, Widget := BtnTabProducts}
+                                            stack_box_slot{Padding := margin{Right := 5.0}, Widget := BtnTabBills}
+                                            stack_box_slot{Widget := ExitBtn}
+                                stack_box_slot:
+                                    HorizontalAlignment := horizontal_alignment.Center
+                                    Padding := margin{Top := 15.0, Bottom := 15.0}
+                                    Widget := StatusTextWidget
+                                stack_box_slot:
+                                    Widget := overlay:
+                                        Slots := array:
+                                            overlay_slot{Widget := UpgradesTab}
+                                            overlay_slot{Widget := PurchasesTab}
+                                            overlay_slot{Widget := BillsTab}
+                                            overlay_slot{Widget := ProductsTab}
+
+            # 5. التحديث النهائي وإظهار الماوس
+            if (OldCanvas := PlayerUIElements[InPlayer]):
+                PlayerUI.RemoveWidget(OldCanvas)
+
+            if (set PlayerUIElements[InPlayer] = NewCanvas):
+                # التعديل هنا: استخدام ui_input_mode.All يجعل الماوس يظهر ويثبت للتفاعل مع القائمة
+                PlayerUI.AddWidget(NewCanvas, player_ui_slot{InputMode := ui_input_mode.All})
+                Print("UI Updated Successfully ✅")
+
+    
+
+
+   
+                    
+
+    NextPageAction(wm : widget_message):void=
+        if ((CurrentPage + 1) < PageWidgets.Length):
+            if (CurrentP := PageWidgets[CurrentPage]):
+                CurrentP.SetVisibility(widget_visibility.Collapsed)
+            set CurrentPage += 1
+            if (NextP := PageWidgets[CurrentPage]):
+                NextP.SetVisibility(widget_visibility.Visible)
+
+    PrevPageAction(wm : widget_message):void=
+        if (CurrentPage > 0):
+            if (CurrentP := PageWidgets[CurrentPage]):
+                CurrentP.SetVisibility(widget_visibility.Collapsed)
+            set CurrentPage -= 1
+            if (PrevP := PageWidgets[CurrentPage]):
+                PrevP.SetVisibility(widget_visibility.Visible)
+
+    # هذه الدالة ستقوم بتغيير العناصر داخل المربع فقط
+    UpdateProductsOnly(InPlayer : player):void=
+        if (PlayerUI := GetPlayerUI[InPlayer]):
+            # 1. بناء المحتوى الجديد مع تحديد مكانه بدقة
+            NewContent := canvas:
+                Slots := array:
+                    canvas_slot:
+                        Anchors := anchors{Minimum := vector2{X := 0.5, Y := 0.5}, Maximum := vector2{X := 0.5, Y := 0.5}}
+                        Offsets := margin{Top := 0.0, Left := 0.0, Right := 0.0, Bottom := 0.0}
+                        Alignment := vector2{X := 0.5, Y := 0.5}
+                        Widget := stack_box:
+                            Orientation := orientation.Vertical
+                            Slots := array:
+                                stack_box_slot:
+                                    Widget := text_block{DefaultText := TextToMsg("الصفحة: {CurrentPage + 1}")}
+                                # أضف هنا أزرار المنتجات الخاصة بك
+
+            # 2. أضف الجديد
+            PlayerUI.AddWidget(NewContent, player_ui_slot{InputMode := ui_input_mode.All})
+
+            # 3. احذف القديم (فقط إذا كان موجوداً)
+            if (OldContent := ProductsContainer[InPlayer]):
+                PlayerUI.RemoveWidget(OldContent)
+
+            # 4. خزن الجديد
+            if (set ProductsContainer[InPlayer] = NewContent):
+                Print("تم التحديث")
+    # دالة لإنشاء صف منتجات بشكل صحيح برمجياً
+    # دالة لإنشاء صف منتجات بشكل صحيح ومضمون
+    # أضفنا FoodItems كبارامتر عشان الدالة ما تطلب self
+    CreateProductRow(StartIdx: int, EndIdx: int, Items : []food_item, Manager : delivery_manager_device) : widget =
+        var ProductSlots : []stack_box_slot = array{}
+        
+        for (I := StartIdx..EndIdx):
+            if (Food := FoodMenu[I]): 
+                NewHandler := product_purchase_handler{ProductIndex := I, Manager := Manager}
+                
+                PriceText := "شراء ({Food.BuyPrice}$)"
+                BtnBuy := button_loud{DefaultText := TextToMsg(PriceText)}
+                BtnBuy.OnClick().Subscribe(NewHandler.OnBuyClicked)
+
+                ProductCard := CreateUpgradeCard(Food.FoodName, "المخزون: {Food.Stock}", BtnBuy)
+                
+                set ProductSlots += array:
+                    stack_box_slot:
+                        HorizontalAlignment := horizontal_alignment.Center
+                        VerticalAlignment := vertical_alignment.Center
+                        Padding := margin{Left := 10.0, Right := 10.0} 
+                        Widget := ProductCard
+           else:
+            # نستخدم لون موجود مسبقاً (مثل الأسود) 
+            # بما أننا لا نحتاج لرؤيته، سنستخدمه كـ "حمالة حطب" فقط لحجز المساحة
+            set ProductSlots += array:
+                stack_box_slot:
+                    HorizontalAlignment := horizontal_alignment.Center
+                    VerticalAlignment := vertical_alignment.Center
+                    Padding := margin{Left := 10.0, Right := 10.0}
+                    # نستخدم canvas فارغ بداخل overlay لحجز المساحة
+                    Widget := overlay:
+                        Slots := array:
+                            overlay_slot:
+                                Widget := color_block:
+                                    DefaultColor := NamedColors.Black
+                                    DefaultDesiredSize := vector2{X := 300.0, Y := 200.0}
+                                    # لجعل اللون غير مرئي تماماً، نتحكم بالـ Opacity لو كان متاحاً
+                                    # أو نتركه أسود إذا كانت الخلفية سوداء، المهم "المساحة"
+        
+        return stack_box:
+            Orientation := orientation.Horizontal
+            Slots := ProductSlots
+
+    OnBuyBtnClicked(wm : widget_message) : void =
+        InPlayer := wm.Player
+        if (PressedButton := button_loud[wm.Source]):
+            if (Index := UIBuyButtons[PressedButton]):
+                TotalInStock := CalculateTotalStock() 
+                
+                if (TotalInStock + 10 <= GlobalMaxCapacity):
+                    if (Item := FoodMenu[Index]):
+                        ShowConfirmDialog(InPlayer, Item.FoodName, Item.BuyPrice, Index)
+                else:
+                    # تحديث الحالة هنا لأن المخزن ممتلئ
+                    set ShopStatusMessage = "⚠️ المخزن ممتلئ! ({TotalInStock}/{GlobalMaxCapacity})"
+                    set StatusColor = NamedColors.Red
+                    ShowUpgradeMenu(InPlayer)
+                    
+                   
+
+         
+
+   
+   # دالة دفع الكهرباء المصححة
+    PayElectricityBill(WM : widget_message):void=
+        InPlayer := WM.Player
+        
+        # قراءة القيم من الذاكرة لضمان الدقة
+        CurrentElecDebt := DebtElectricity
+        CurrentMoney := PlayerMoney
+
+        if (CurrentElecDebt > 0):
+            var AmountToDeduct : int = 0
+            
+            # --- منطق الدفع الجزئي ---
+            if (CurrentMoney >= CurrentElecDebt):
+                # إذا معك فلوس كافية، ادفع كامل فاتورة الكهرباء
+                set AmountToDeduct = CurrentElecDebt
+            else:
+                # إذا معك أقل، ادفع كل ما تملك للكهرباء
+                set AmountToDeduct = CurrentMoney
+
+            if (AmountToDeduct > 0):
+                # الخصم الحسابي الصريح (طرح فقط)
+                set PlayerMoney = CurrentMoney - AmountToDeduct
+                set DebtElectricity = CurrentElecDebt - AmountToDeduct
+                
+                Print("الكهرباء: خصم {AmountToDeduct}، المتبقي: {DebtElectricity}")
+
+                SavePlayerData(InPlayer)
+                
+                HUDMessage.SetText(TextToMsg("⚡ تم دفع {AmountToDeduct}$ من فاتورة الكهرباء"))
+                HUDMessage.Show(InPlayer)
+            else:
+                HUDMessage.SetText(TextToMsg("❌ لا تملك مالاً كافياً للكهرباء"))
+                HUDMessage.Show(InPlayer)
+        else:
+            HUDMessage.SetText(TextToMsg("فاتورة الكهرباء مدفوعة ✅"))
+            HUDMessage.Show(InPlayer)
+
+        # تحديث الواجهة وإغلاق المنيو
+        CloseAllUI(WM)
+        UpdateUI(InPlayer)
+
+        
+    # دالة دفع الإيجار المصححة
+    PayRentBill(WM : widget_message):void=
+            InPlayer := WM.Player
+            
+            # قراءة القيم الحقيقية من الذاكرة الآن
+            CurrentDebt := DebtRent
+            CurrentMoney := PlayerMoney
+
+            if (CurrentDebt > 0):
+                var AmountToDeduct : int = 0
+                
+                # --- منطق الدفع الجزئي ---
+                if (CurrentMoney >= CurrentDebt):
+                    # إذا معك فلوس كافية، ادفع الدين كامل
+                    set AmountToDeduct = CurrentDebt
+                else:
+                    # إذا معك أقل، ادفع كل اللي في جيبك
+                    set AmountToDeduct = CurrentMoney
+
+                if (AmountToDeduct > 0):
+                    # الخصم الحسابي الصريح
+                    set PlayerMoney = CurrentMoney - AmountToDeduct
+                    set DebtRent = CurrentDebt - AmountToDeduct
+                    SavePlayerData(InPlayer)
+                    
+                    # رسالة HUD توضح المبلغ المخصوم فعلياً
+                    HUDMessage.SetText(TextToMsg("✅ تم دفع {AmountToDeduct}$ من الإيجار"))
+                    HUDMessage.Show(InPlayer)
+                    
+                    Print("تمت العملية: خصم {AmountToDeduct}، المتبقي من الدين: {DebtRent}")
+                else:
+                    HUDMessage.SetText(TextToMsg("❌ محفظتك فارغة تماماً!"))
+                    HUDMessage.Show(InPlayer)
+            else:
+                HUDMessage.SetText(TextToMsg("مدفوع بالكامل ✅"))
+                HUDMessage.Show(InPlayer)
+
+            # تحديث وإغلاق
+            CloseAllUI(WM)
+            UpdateUI(InPlayer)
+
+    # دالة معالجة الشراء
+    # دالة معالجة الشراء الكاملة
+    ProcessPurchase(InPlayer : player, Index : int) : void =
+        if (Food := FoodMenu[Index]):
+            if (PlayerMoney >= Food.BuyPrice):
+                set PlayerMoney -= Food.BuyPrice
+                MoneyTextBlock.SetText(TextToMsg("💰 {PlayerMoney}$"))
+                set Food.Stock += 12
+                set ShopStatusMessage = "✅ تم شراء {Food.FoodName}"
+                set StatusColor = NamedColors.Yellow
+                PurchaseSound.Play(InPlayer)
+            else:
+                set ShopStatusMessage = "❌ ليس لديك المال الكافي للشراء!"
+                set StatusColor = NamedColors.Red
+
+        # --- الحل اللي بريح الراس ---
+        SavePlayerData(InPlayer) # حفظ البيانات
+        UpdateUI(InPlayer)       # تحديث الأرقام
+
+        
+        StatusTextBlock.SetText(TextToMsg(ShopStatusMessage))
+        StatusTextBlock.SetTextColor(StatusColor)
+        
+    # دالة معالجة أي تطوير في اللعبة
+    # دالة معالجة أي تطوير في اللعبة (خيار احترافي)
+    ProcessUpgrade(InPlayer: player, ID: int, Name: string, Cost: int) : void =
+        if (PlayerMoney >= Cost):
+            set PlayerMoney -= Cost
+            
+            if (ID = 102): # المخزن
+                set WarehouseLevel += 1
+                set GlobalMaxCapacity += 50
+            else if (ID = 104): # الحقيبة
+                set PackLevel += 1
+            else if (ID = 2): # التحضير
+                set PrepLevel += 1
+            else if (ID = 3): # الفرن
+                set CookLevel += 1
+            
+            set ShopStatusMessage = "✅ تم تطوير {Name}!"
+            set StatusColor = NamedColors.Green
+            PurchaseSound.Play(InPlayer)
+        else:
+            set ShopStatusMessage = "❌ ليس لديك المال الكافي لتطوير  {Name}"
+            set StatusColor = NamedColors.Red
+
+        # السطرين هدول هم "السحر" اللي بحدث الشاشة فوراً
+        SavePlayerData(InPlayer)
+        UpdateUI(InPlayer)
+        
+        
+    
+            
+                    
+
+    
+    # دالة تحديث القائمة (مهمة جداً لضمان عمل الـ Refresh)
+    RefreshUI(InPlayer : player):void=
+        if (PlayerUI := GetPlayerUI[InPlayer]):
+            # 1. إزالة الواجهة القديمة فوراً
+            if (OldCanvas := MainCanvas?):
+                PlayerUI.RemoveWidget(OldCanvas)
+            
+            # 2. تصفير المتغير
+            set MainCanvas = false
+            
+            # 3. بناء واجهة جديدة كلياً لتقرأ قيمة PlayerMoney الجديدة
+            ShowUpgradeMenu(InPlayer)
+    
+
+    # --- دوال تبديل الـ Tabs ---
+    HandleTabUpgrades(wm : widget_message):void=
+        set CurrentTab = 0
+        UpdateTabsVisibility()
+
+    HandleTabPurchases(wm : widget_message):void=
+        set CurrentTab = 1
+        UpdateTabsVisibility()
+
+    HandleTabBills(wm : widget_message):void=
+        set CurrentTab = 2
+        UpdateTabsVisibility()
+
+    HandleTabProducts(wm : widget_message):void=
+        set CurrentTab = 3
+        # في تبويب المنتجات قد تحتاج لتحديث الصور أو الأسعار، لذا نستدعي الدالة الكاملة
+        UpdateTabsVisibility()
+
+
+    HandleTabBank(WMD : widget_message):void=
+        set CurrentTab = 4
+        if (InPlayer := player[WMD.Player]):
+            ShowUpgradeMenu(InPlayer)
+
+    
+    
+    # --- واجهة التأكيد (مبنية على دوالك) ---
+    ShowConfirmDialog(InPlayer : player, Type : string, Price : int, Index : int):void=
+        if (PlayerUI := GetPlayerUI[InPlayer]):
+            set PendingIndex = Index # حفظ رقم المنتج للاستخدام عند التأكيد
+            
+            BtnYes := button_loud{DefaultText := TextToMsg("✅ نعم، شراء")}
+            BtnNo := button_regular{DefaultText := TextToMsg("❌ إلغاء")}
+            
+            # ربط الأزرار بدوال صريحة
+            BtnYes.OnClick().Subscribe(OnConfirmAccept)
+            BtnNo.OnClick().Subscribe(OnConfirmCancel)
+
+            SetConfirmCanvas(InPlayer, Type, Price, BtnYes, BtnNo)
+            
+
+    # دالة لبناء الكانفاس (نفس تصميمك الجميل)
+    SetConfirmCanvas(InPlayer : player, Type : string, Price : int, BtnYes : widget, BtnNo : widget) : void =
+        if (PlayerUI := GetPlayerUI[InPlayer]):
+            NewConfirmUI := canvas:
+                Slots := array:
+                    canvas_slot: # تظليل الخلفية
+                        ZOrder := 5
+                        Anchors := anchors{Minimum := vector2{X := 0.0, Y := 0.0}, Maximum := vector2{X := 1.0, Y := 1.0}}
+                        Widget := color_block{DefaultColor := MakeColorFromHex("000000CC")} 
+                    canvas_slot: # النافذة
+                        ZOrder := 10
+                        Anchors := anchors{Minimum := vector2{X := 0.5, Y := 0.5}, Maximum := vector2{X := 0.5, Y := 0.5}}
+                        Alignment := vector2{X := 0.5, Y := 0.5}
+                        Widget := overlay:
+                            Slots := array:
+                                overlay_slot: # الإطار الذهبي
+                                    Widget := color_block{DefaultColor := MakeColorFromHex("FFD700FF"), DefaultDesiredSize := vector2{X := 520.0, Y := 400.0}}
+                                overlay_slot: # الخلفية السوداء
+                                    Padding := margin{Top := 4.0 ,Bottom := 4.0 , Left := 4.0 , Right:=4.0 }
+                                    Widget := color_block{DefaultColor := MakeColorFromHex("101010FF"), DefaultDesiredSize := vector2{X := 500.0, Y := 380.0}}
+                                overlay_slot: # المحتوى
+                                    Widget := stack_box:
+                                        Orientation := orientation.Vertical
+                                        Slots := array:
+                                            stack_box_slot:
+                                                Padding := margin{Top := 40.0, Bottom := 10.0}
+                                                HorizontalAlignment := horizontal_alignment.Center
+                                                Widget := text_block{DefaultText := TextToMsg("تأكيد شراء {Type}"), DefaultTextColor := NamedColors.White}
+                                            stack_box_slot:
+                                                Padding := margin{ Top := 30.0 ,Bottom := 30.0}
+                                                HorizontalAlignment := horizontal_alignment.Center
+                                                Widget := text_block{DefaultText := TextToMsg("السعر: {Price}$"), DefaultTextColor := NamedColors.Green}
+                                            stack_box_slot:
+                                                HorizontalAlignment := horizontal_alignment.Center
+                                                Widget := stack_box:
+                                                    Orientation := orientation.Horizontal
+                                                    Slots := array:
+                                                        stack_box_slot{Padding := margin{Right := 20.0}, Widget := BtnYes} 
+                                                        stack_box_slot{Widget := BtnNo} 
+            
+            # تخزين الكانفاس في المتغير العام لكي نستطيع حذفه لاحقاً عند الضغط على نعم/لا
+            set ConfirmCanvas = option{NewConfirmUI}
+            
+            # إضافة الواجهة للشاشة وتفعيل الماوس لكي لا يعلق
+            PlayerUI.AddWidget(NewConfirmUI, player_ui_slot{InputMode := ui_input_mode.All})
+            Print("تم إظهار نافذة التأكيد بنجاح ✅")
+    # --- دوال التعامل مع الضغط ---
+
+    OnConfirmAccept(wm : widget_message) : void =
+        InPlayer := wm.Player
+        if (PlayerUI := GetPlayerUI[InPlayer]):
+            # 1. الحذف هو الحل الوحيد لإخفاء الماوس تماماً
+            if (ActualCanvas := ConfirmCanvas?):
+                PlayerUI.RemoveWidget(ActualCanvas)
+                set ConfirmCanvas = false # تفريغ المتغير مهم جداً
+
+            # 2. تنفيذ العمليات (كودك كما هو)
+            if (PendingIndex = 99): # تطوير التحضير
+                PriceToPay := BasePrice + (PrepLevel * 200)
+                if (PlayerMoney >= PriceToPay):
+                    set PlayerMoney -= PriceToPay
+                    set PrepLevel += 1
+                    PurchaseSound.Play(InPlayer)
+                else:
+                    Print("المال غير كافٍ")
+
+            else if (PendingIndex = 100): # تطوير الطبخ
+                PriceToPay := BasePrice + (CookLevel * 200)
+                if (PlayerMoney >= PriceToPay):
+                    set PlayerMoney -= PriceToPay
+                    set CookLevel += 1
+                    PurchaseSound.Play(InPlayer)
+
+            else if (PendingIndex = 101): # تطوير الحقيبة
+                PriceToPay := BasePrice + (PackLevel * 200)
+                if (PlayerMoney >= PriceToPay):
+                    set PlayerMoney -= PriceToPay
+                    set PackLevel += 1
+                    set ShopStatusMessage = "✅ تم تطوير الحقيبة للمستوى {PackLevel}"
+                    PurchaseSound.Play(InPlayer)
+                else:
+                    set ShopStatusMessage = "❌ مال غير كافٍ للحقيبة!"
+
+            else if (PendingIndex = 102): # تطوير المخزن
+                PriceToPay := BasePrice + (WarehouseLevel * 300)
+                if (PlayerMoney >= PriceToPay):
+                    set PlayerMoney -= PriceToPay
+                    set WarehouseLevel += 1
+                    set GlobalMaxCapacity += 50
+                    set ShopStatusMessage = "✅ تم تطوير المخزن للمستوى {WarehouseLevel}"
+                    PurchaseSound.Play(InPlayer)
+                else:
+                    set ShopStatusMessage = "❌ مال غير كافٍ للمخزن!"
+
+            
+            else: 
+                ProcessPurchase(InPlayer, PendingIndex)
+
+            # 3. التحديث النهائي
+            SavePlayerData(InPlayer)
+            CloseAllUI(wm)
+           
+   
+    
+            # 4. إعادة بناء الواجهة بالأرقام الجديدة فوراً
+            ShowUpgradeMenu(InPlayer)
+            
+           
+
+            
+            
+            
+
+    OnConfirmCancel(wm : widget_message) : void =
+        InPlayer := wm.Player
+        if (PlayerUI := GetPlayerUI[InPlayer]):
+            if (ActualCanvas := ConfirmCanvas?):
+                # 1. نحذف فقط نافذة التأكيد الصغيرة
+                PlayerUI.RemoveWidget(ActualCanvas)
+                
+                # 2. نفرغ المتغير لكي نستطيع فتحه مرة أخرى لاحقاً
+                set ConfirmCanvas = false
+                
+                
+                # ملاحظة: الماوس لن يختفي ولن يتحرك من مكانه 
+                # لأن الواجهة الرئيسية لا تزال موجودة خلفها ولم نلمسها
+                Print("تم إلغاء الشراء وإغلاق النافذة بنجاح ✅")
+   
+    
+
+    
+
+    ConfirmPurchase(WM : widget_message):void=
+        InPlayer := WM.Player
+        var Price : int = 0
+        var ArabicName : string = "" # أضفنا هذا لعرض اسم بالعربي في الرسالة
+
+        # --- 1. حساب السعر وتحديد الاسم العربي ---
+        if (CurrentBuyingType = "Prep"):
+            set Price = BasePrice + (PrepLevel * 200)
+            set ArabicName = "طاولة التحضير"
+        else if (CurrentBuyingType = "Cook"):
+            set Price = BasePrice + (CookLevel * 200)
+            set ArabicName = "الفرن"
+        else if (CurrentBuyingType = "Pack"):
+            set Price = BasePrice + (PackLevel * 200)
+            set ArabicName = "الحقيبة"
+        else if (CurrentBuyingType = "Warehouse"):
+            set Price = 500 + (WarehouseLevel * 300)
+            set ArabicName = "المخزن"
+        else if (CurrentBuyingType = "VIP"):
+            set Price = 2000 
+            set ArabicName = "VIP"
+        
+
+        # --- 2. التحقق من المال والتنفيذ ---
+        if (PlayerMoney >= Price):
+            set PlayerMoney -= Price
+            
+            # تنفيذ التطوير
+            if (CurrentBuyingType = "Prep"):
+                set PrepLevel += 1
+            else if (CurrentBuyingType = "Cook"):
+                set CookLevel += 1
+            else if (CurrentBuyingType = "Pack"):
+                set PackLevel += 1
+            else if (CurrentBuyingType = "Warehouse"):
+                set WarehouseLevel += 1
+                set GlobalMaxCapacity += 50
+           
+                
+
+            # تحديث الرسالة بالاسم العربي
+            set ShopStatusMessage = "✅ تم تطوير {ArabicName} بنجاح!"
+            set StatusColor = NamedColors.Green
+            
+            SavePlayerData(InPlayer)
+            
+        else:
+            # رسالة الفشل
+            set ShopStatusMessage = "❌ ليس لديك مال كافٍ لتطوير {ArabicName}!"
+            set StatusColor = NamedColors.Red
+        
+        # --- 3. إغلاق النافذة وتحديث المتجر ---
+        CloseConfirmUI(WM.Player)
+        ShowUpgradeMenu(WM.Player) # <--- هذا السطر هو اللي بيخلي دالتك اللي فوق "تصحى" وتشوف الرسالة
+
+
+    GetMostSold():string=
+        var TopName : string = "لا يوجد"
+        var MaxSold : int = 0
+
+    # بنلف على كل الأكلات الموجودة في الماب
+        for (FoodName -> Count : DailySalesTracker):
+            if (Count > MaxSold):
+                set MaxSold = Count
+                set TopName = FoodName
+        
+        return TopName
+
+
+
+            
+    # دالة تفعيل طلب الفحم للطوارئ
+   
+
+
+    # دالة زر التحظير 
+    HandlePrepClick(WM : widget_message):void=
+        set CurrentBuyingType = "Prep"
+        CloseMainUI(WM.Player)
+        ShowConfirmDialog(WM.Player, "التحضير", BasePrice + (PrepLevel * 200), 99)
+
+        
+    # دالة زر تطوير الطبخ
+    HandleCookClick(WM : widget_message):void=
+        set CurrentBuyingType = "Cook"
+        CloseMainUI(WM.Player)
+        # أضفنا الرقم 100 ليمثل تطوير "الطبخ"
+        ShowConfirmDialog(WM.Player, "الطبخ", BasePrice + (CookLevel * 200), 100)
+
+    # دالة زر تطوير الحقيبة
+    HandlePackClick(WM : widget_message):void=
+        Price := BasePrice + (PackLevel * 200) 
+        ShowConfirmDialog(WM.Player, "الحقيبة", Price, 101)
+
+    HandleWarehouseClick(WM : widget_message):void=
+        Price := 500 + (WarehouseLevel * 300) 
+        ShowConfirmDialog(WM.Player, "المخزن", Price, 102)
+
+    
+
+    
+
+        
+    HandleRadarClick(WM : widget_message):void=
+        if (InPlayer := player[WM.Player]):
+            if (HasRadarUpgrade = false):
+                RadarPrice := 1000 # غيرها ل 1000
+                if (PlayerMoney >= RadarPrice):
+                    set PlayerMoney -= RadarPrice
+                    set HasRadarUpgrade = true
+                    SavePlayerData(InPlayer)
+                    CloseAllUI(WM)
+                    # 2. تحديث الـ UI الأساسية (اللي فيها الفلوس والنجوم على الشاشة)
+                    UpdateUI(InPlayer)
+                    
+                    # تحديث الواجهة فوراً ليتغير النص إلى "مملوك"
+                    ShowUpgradeMenu(InPlayer) 
+                    
+                    HUDMessage.SetText(TextToMsg("📡 تم تفعيل الرادار بنجاح!"))
+                    HUDMessage.Show(InPlayer)
+                else:
+                    HUDMessage.SetText(TextToMsg("❌ لا تملك المال الكافي!"))
+                    HUDMessage.Show(InPlayer)
+                    CloseAllUI(WM)
+            else:
+                HUDMessage.SetText(TextToMsg("⚠️ نظام الرادار مفعل مسبقاً"))
+                HUDMessage.Show(InPlayer)
+                CloseAllUI(WM)
+
+    # دالة التعامل مع ضغطة زر الـ VIP
+    # لاحظ كتابة (Data : widget_control_data)
+   # لاحظ تغيير النوع هنا لـ agent
+    HandleVIPClick(WM : widget_message):void=
+        if (InPlayer := player[WM.Player]):
+            # 1. إغلاق الواجهة فوراً قبل أي شيء ليرى اللاعب الرسالة
+            CloseAllUI(WM)
+
+            # 2. فحص الشروط
+            if (IsVIPPurchased = true):
+                # إذا كان مشتريها مسبقاً
+                HUDMessage.SetText(TextToMsg("⚠️ لديك نظام VIP بالفعل!"))
+                HUDMessage.Show(InPlayer)
+                
+            else if (PlayerMoney >= VIPPrice and PlayerLevel >= RequiredVIPLevel):
+                # --- ✅ نجاح الشراء ---
+                set PlayerMoney -= VIPPrice
+                set IsVIPPurchased = true
+                SavePlayerData(InPlayer)
+                
+                set NormalOrderCount = 0
+                set NextVIPTarget = GetRandomInt(2, 5) 
+                
+                HUDMessage.SetText(TextToMsg("🌟 مبروك! تم تفعيل نظام VIP"))
+                HUDMessage.Show(InPlayer)
+                UpdateUI(InPlayer)
+                UpdateButtonsState() # لتحديث الألوان في المنيو لو فتحها مرة ثانية
+
+            else:
+                # --- ❌ فشل الشراء (لفل ناقص أو فلوس ناقصة) ---
+                var ErrorMsg : string = ""
+                if (PlayerMoney < VIPPrice):
+                    set ErrorMsg = "❌ أموالك غير كافية! تحتاج {VIPPrice}$"
+                else:
+                    set ErrorMsg = "🔒 لفل ناقص! تحتاج مستوى {RequiredVIPLevel} لتفعيل الـ VIP"
+                
+                HUDMessage.SetText(TextToMsg(ErrorMsg))
+                HUDMessage.Show(InPlayer)
+                Print("❌ فشل الشراء: {ErrorMsg}")
+
+    CalculateCurrentTotalStock() : int =
+        var Sum : int = 0
+        for (Item : FoodMenu):
+            set Sum += Item.Stock
+        return Sum
+
+    UpgradeWarehouse(InAgent : agent) : void =
+        # سعر التطوير يعتمد على المستوى الحالي
+        UpgradeCost := WarehouseLevel * 300 
+        
+        if (PlayerMoney >= UpgradeCost):
+            set PlayerMoney -= UpgradeCost
+            set WarehouseLevel += 1
+            set GlobalMaxCapacity += 50 # زيادة السعة 50 حبة إضافية
+            
+            # حفظ البيانات فوراً
+            if (InPlayer := player[InAgent]):
+                SavePlayerData(InPlayer)
+                UpdateUI(InPlayer)
+            Print("🚀 تم تطوير المخزن للمستوى {WarehouseLevel}")
+        else:
+            Print("❌ تحتاج {UpgradeCost}$ لتطوير المخزن")
+
+    HandlePlayerJoined(InPlayer : player) : void = # هنا تم تعريف InPlayer
+        if (Stats := SavedPlayerData[InPlayer]):
+            set PlayerMoney = Stats.Money
+            set PlayerLevel = Stats.Level
+            # هنا أضف الأسطر الجديدة:
+            set WarehouseLevel = Stats.SavedWarehouseLevel
+            set GlobalMaxCapacity = Stats.SavedGlobalMaxCapacity
+            
+            UpdateUI(InPlayer)
+
+
+    # إغلاق القائمة الرئيسية
+    # إغلاق النافذة الرئيسية ومسحها تماماً
+    CloseMainUI(InPlayer : player):void=
+        if (PlayerUI := GetPlayerUI[InPlayer]):
+            if (CurrentMain := MainCanvas?):
+                # عند حذف الـ Widget الذي تم إضافته بوضع ui_input_mode.All
+                # يقوم المحرك تلقائياً بإرجاع الماوس للعبة
+                PlayerUI.RemoveWidget(CurrentMain)
+                set MainCanvas = false 
+                Print("تم إغلاق النافذة")
+
+    # إغلاق نافذة التأكيد ومسحها تماماً
+    CloseConfirmUI(InPlayer : player):void=
+        if (PlayerUI := GetPlayerUI[InPlayer]):
+            if (CurrentConfirm := ConfirmCanvas?):
+                PlayerUI.RemoveWidget(CurrentConfirm)
+                set ConfirmCanvas = false # تفريغ المتغير
+                Print("تم إغلاق نافذة التأكيد")
+
+    # دالة لإلغاء الحدث وتنظيف الأجهزة
+    CleanupEvent():void=
+        set IsEventActive = false
+        set CurrentEventLocation = ""
+        set ActiveEventReqs = map{} # تصفير الماب مهم جداً
+        RadarPark.Disable()
+        RadarSchool.Disable()
+        for (Btn : ParkConditionButtons) do Btn.Disable()
+        for (Btn : SchoolConditionButtons) do Btn.Disable()
+        
+
+    # العودة من التأكيد للقائمة الرئيسية (عند الضغط على "لا" أو بعد الشراء)
+    BackToMain(WM : widget_message):void=
+        InPlayer := WM.Player
+        # بدلاً من الإغلاق اليدوي، استعمل دالة تنظيف شاملة
+        CloseConfirmUI(InPlayer)
+        # تأكد من إغلاق المنيو الرئيسية القديمة أيضاً قبل فتحها من جديد
+        CloseMainUI(InPlayer) 
+        ShowUpgradeMenu(InPlayer)
+
+    # --- إغلاق كل شيء والعودة للعب ---
+    CloseAllUI(wm : widget_message):void=
+        InPlayer := wm.Player
+        if (PlayerUI := GetPlayerUI[InPlayer]):
+            # 1. البحث عن الواجهة وحذفها من شاشة اللاعب
+            if (ActualCanvas := PlayerUIElements[InPlayer]):
+                PlayerUI.RemoveWidget(ActualCanvas)
+                
+                Print("UI Removed Successfully ✅")
+
+            # إغلاق نافذة التأكيد أيضاً
+            if (ActualConfirm := ConfirmCanvas?):
+                PlayerUI.RemoveWidget(ActualConfirm)
+                set ConfirmCanvas = false
+                
+
+# دالة تحسب الحي بناءً على الرقم وتجلبه من المصفوفة
+    GetDistrictName(HouseNumber : int) : string =
+        # الشقق 1-10 (Index 0)، 11-20 (Index 1)، 21-30 (Index 2)
+        var DistrictIndex : int = 0
+        
+        if (HouseNumber > 20 and HouseNumber <= 40):
+            set DistrictIndex = 1
+        else if (HouseNumber > 40 and HouseNumber <= 60):
+            set DistrictIndex = 2
+        else if (HouseNumber > 60 and HouseNumber <= 80):
+            set DistrictIndex = 3
+            
+        # التأكد أن المصفوفة تحتوي على هذا العنصر لتجنب الأخطاء
+        if (Name := DistrictNames[DistrictIndex]):
+            return Name
+            
+        return "منطقة خارجية"
+
+    # دالة تحسب المجموع الحالي لكل الأصناف
+    CalculateTotalStock() : int =
+        var Total : int = 0
+        for (Item : FoodMenu):
+            set Total += Item.Stock
+        return Total
+
+    # عند الضغط على زر الشراء (مثلاً لبرجر - Index 0)
+    BuyStock(InPlayer : player, Index : int) : void =
+        CurrentTotal := CalculateTotalStock()
+        BatchSize := 10 # الكمية التي تضاف في كل شحنة
+        
+        if (CurrentTotal + BatchSize <= GlobalMaxCapacity):
+            if (PlayerMoney >= 50): # سعر الشحنة
+                set PlayerMoney -= 50
+                if (set FoodMenu[Index].Stock += BatchSize):
+                    Print("✅ تم الشراء. المخزن: {CurrentTotal + BatchSize}/{GlobalMaxCapacity}")
+                    SavePlayerData(InPlayer) # حفظ التغيير
+                    UpdateUI(InPlayer)
+            else:
+                Print("❌ فلوسك ما تكفي!")
+        else:
+            Print("⚠️ المخزن ممتلئ! السعة {GlobalMaxCapacity}")
+
+    
+    # =============================================================
+    # ⚠️ تعليم للمطور (للاختبار فقط):
+    # هاد الجزء عشان الاختبار من جهاز الزر في الماب. احذفه قبل النشر.
+    # =============================================================
+    OnTestButtonInteracted(InAgent : agent):void=
+        if (InPlayer := player[InAgent]):
+            # 1. زيادة المستوى فوراً بضغطة واحدة
+            set PlayerLevel += 1 
+            set PlayerMoney += 1000 # مكافأة اختبار كبيرة
+            set CompletedOrders = 0  # تصفير العداد للمستوى القادم
+            
+            # اجعل العتبة القادمة ثابتة وصغيرة للاختبار
+            set NextLevelThreshold = 2 
+
+            Print("🛠️ DEBUG: Forced Level Up! New Level: {PlayerLevel}")
+
+            # --- 📝 منطق كشف الأكلات المفتوحة (يبقى كما هو للتأكد من عمله) ---
+            var UnlockedItemsName : string = ""
+            for (Food : FoodMenu):
+                if (Food.RequiredLevel = PlayerLevel):
+                    if (UnlockedItemsName = ""):
+                        set UnlockedItemsName = Food.FoodName
+                    else:
+                        set UnlockedItemsName = UnlockedItemsName + " و " + Food.FoodName
+
+            var FinalDesc : string = "اختبار: وصلت للمستوى {PlayerLevel} 🎉"
+            if (not UnlockedItemsName = ""):
+                set FinalDesc = "{FinalDesc}\n تم فتح: {UnlockedItemsName}"
+
+            # إظهار الـ Popup فوراً
+            LevelUpPopup.SetTitleText(TextToMsg("🆙 مستوى جديد (DEBUG)"))
+            LevelUpPopup.SetDescriptionText(TextToMsg(FinalDesc))
+            LevelUpPopup.Show(InAgent)
+
+            # 3. تحديث الحفظ والواجهة (ضروري جداً)
+            NewStats := player_stats{
+                Money := PlayerMoney
+                Level := PlayerLevel
+                TotalOrders := CompletedOrders
+                SavedCookLevel := CookLevel
+            }
+            
+            if (set SavedPlayerData[InPlayer] = NewStats):
+                UpdateUI(InPlayer) 
+                UpdateButtonsState() # لتجربة فتح أجهزة الطبخ الجديدة فوراً
+                Print("Test Level Saved ✅")
+        # =============================================================
+
+
+    
+    
